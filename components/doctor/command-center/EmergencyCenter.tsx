@@ -14,7 +14,13 @@ import { ccClasses } from '@/lib/doctor/command-center/theme';
 
 export function EmergencyCenter() {
   const session = getDoctorSession();
-  const { data: ctx } = useDoctorContext(session.employeeId);
+  const employeeId =
+    session?.employeeId ||
+    (session as any)?.doctorId ||
+    (session as any)?.doctor_id ||
+    'RH-D01';
+
+  const { data: ctx } = useDoctorContext(employeeId);
   const doctorUuid = ctx?.doctorUuid ?? '';
 
   const { data: alerts = [], isLoading } = useEmergencyAlertsRealtime(doctorUuid);
