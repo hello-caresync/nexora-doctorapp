@@ -40,7 +40,7 @@ export function useHospitalOpsRealtime(onRefresh: () => void) {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'system_notifications' }, () =>
         onRefresh(),
       )
-      .subscribe((status) => {
+      .subscribe((status: string) => {
         if (mounted) setConnected(status === 'SUBSCRIBED');
       });
 
