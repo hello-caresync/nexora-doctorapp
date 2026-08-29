@@ -11,12 +11,21 @@ type DoctorTopNavProps = {
 };
 
 export function DoctorTopNav({ session, onOpenMenu, onLogout }: DoctorTopNavProps) {
-  const initials = session.fullName
-    .replace(/^Dr\.?\s*/i, '')
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('');
+  const displayName =
+    (session as any)?.fullName ||
+    (session as any)?.doctorName ||
+    (session as any)?.doctor_name ||
+    'Doctor';
+
+  const initials =
+    displayName
+      .replace(/^Dr\.?\s*/i, '')
+      .trim()
+      .split(/\s+/)
+      .slice(0, 2)
+      .map((s: string) => s[0] || '')
+      .join('')
+      .toUpperCase() || 'DR';
 
   return (
     <header className="doctor-glass sticky top-0 z-30 border-x-0 border-t-0 px-4 py-3 md:px-6">
@@ -48,8 +57,8 @@ export function DoctorTopNav({ session, onOpenMenu, onLogout }: DoctorTopNavProp
               {initials}
             </span>
             <span className="max-w-40 leading-tight">
-              <span className="block truncate text-xs font-black text-[#2C243B]">{session.fullName}</span>
-              <span className="block text-[10px] font-bold text-[#9887B1]">{session.employeeId}</span>
+              <span className="block truncate text-xs font-black text-[#2C243B]">{displayName}</span>
+              <span className="block text-[10px] font-bold text-[#9887B1]">{session.employeeId ?? session.doctorId}</span>
             </span>
           </div>
           <button
