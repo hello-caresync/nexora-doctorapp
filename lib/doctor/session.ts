@@ -1,120 +1,100 @@
-import { DEFAULT_REGAL_DOCTOR, type RegalDoctor } from './regal-doctors';
-import { DOCTOR_STORAGE_KEYS, readJsonStorage, writeJsonStorage } from './storage-keys';
-
-export type DoctorSession = {
-  employeeId: string;
-  fullName: string;
-  doctor_name: string;
-  department: string;
-  loginIdentifier?: string;
-  email?: string;
+export interface DoctorSession {
+  doctorId: string;
+  doctorName: string;
+  department?: string;
   specialization?: string;
-  qualification?: string;
-  opdRoom?: string;
-  consultationFee?: number;
-  fee: number;
-  hospitalId?: string;
-  hospitalName: string;
-  signedInAt: string;
-};
-
-export const REGAL_HOSPITAL_ID = 'a1eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
-export const DOCTOR_SESSION_CHANGED_EVENT = 'nexora:doctor-session-changed';
-
-export function doctorToSession(doctor: RegalDoctor, email?: string): DoctorSession {
-  const resolvedEmail = email ?? `${doctor.employeeId.toLowerCase()}@regal.local`;
-  return {
-    employeeId: doctor.employeeId,
-    fullName: doctor.name,
-    doctor_name: doctor.name,
-    department: doctor.department,
-    email: resolvedEmail,
-    specialization: doctor.specialization,
-    qualification: doctor.specialization,
-    consultationFee: doctor.fee,
-    fee: doctor.fee,
-    hospitalId: REGAL_HOSPITAL_ID,
-    hospitalName: 'Regal Hospital',
-    signedInAt: new Date().toISOString(),
-  };
+  email?: string;
+  hospitalCode?: string;
+  portalRoute?: string;
+  loggedInAt?: string;
 }
 
-export function getActiveDoctorSession(): DoctorSession | null {
+const SESSION_KEY = 'active_doctor_session';
+
+export function getDoctorSession(): DoctorSession | null {
   if (typeof window === 'undefined') return null;
 
-  const active = readJsonStorage<DoctorSession | null>(DOCTOR_STORAGE_KEYS.doctorSession, null);
-  if (active) {
-    return {
-      ...active,
-      doctor_name: active.doctor_name ?? active.fullName,
-      hospitalName: active.hospitalName ?? 'Regal Hospital',
-      signedInAt: active.signedInAt ?? new Date().toISOString(),
-      fee: active.fee ?? active.consultationFee ?? 0,
-      qualification: active.qualification ?? active.specialization,
-    };
-  }
+  const raw =
+    sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY);
+  if (!raw) return null;
 
-  const legacy = readJsonStorage<DoctorSession | null>(
-    DOCTOR_STORAGE_KEYS.legacyDoctorSession,
-    null,
-  );
-  if (legacy) {
-    const migrated = {
-      ...legacy,
-      doctor_name: legacy.doctor_name ?? legacy.fullName,
-      hospitalName: legacy.hospitalName ?? 'Regal Hospital',
-      signedInAt: legacy.signedInAt ?? new Date().toISOString(),
-      fee: legacy.fee ?? legacy.consultationFee ?? 0,
-      qualification: legacy.qualification ?? legacy.specialization,
-    };
-    writeJsonStorage(DOCTOR_STORAGE_KEYS.doctorSession, migrated);
-    return migrated;
-  }
-
-  return null;
-}
-
-export function getDoctorSession(): DoctorSession {
-  return getActiveDoctorSession() ?? doctorToSession(DEFAULT_REGAL_DOCTOR);
-}
-
-export function setDoctorSession(session: DoctorSession): void {
-  writeJsonStorage(DOCTOR_STORAGE_KEYS.doctorSession, session);
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent(DOCTOR_SESSION_CHANGED_EVENT, { detail: session }));
+  try {
+    const parsed = JSON.parse(raw) as DoctorSession;
+    if (!parsed?.doctorId || !parsed?.doctorName) return null;
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
-export function profileToSession(profile: {
-  id: string;
-  name: string;
-  email: string;
-  department: string;
-  room: string;
-  fee: number;
-}): DoctorSession {
-  return {
-    employeeId: profile.id,
-    fullName: profile.name,
-    doctor_name: profile.name,
-    department: profile.department,
-    email: profile.email,
-    loginIdentifier: profile.email,
-    specialization: profile.department,
-    qualification: profile.department,
-    opdRoom: profile.room,
-    consultationFee: profile.fee,
-    fee: profile.fee,
-    hospitalId: REGAL_HOSPITAL_ID,
-    hospitalName: 'Regal Hospital',
-    signedInAt: new Date().toISOString(),
-  };
+export function saveDoctorSession(session: DoctorSession, remember = true): void {
+  const payload = { ...session, loggedInAt: new Date().toISOString() };
+  const serialized = JSON.stringify(payload);
+  sessionStorage.setItem(SESSION_KEY, serialized);
+  if (remember) {
+    localStorage.setItem(SESSION_KEY, serialized);
+  } else {
+    localStorage.removeItem(SESSION_KEY);
+  }
 }
 
 export function clearDoctorSession(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(DOCTOR_STORAGE_KEYS.doctorSession);
-  localStorage.removeItem(DOCTOR_STORAGE_KEYS.activeDoctor);
-  localStorage.removeItem(DOCTOR_STORAGE_KEYS.legacyDoctorSession);
-  window.dispatchEvent(new CustomEvent(DOCTOR_SESSION_CHANGED_EVENT, { detail: null }));
+  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+function normalizeDoctorName(name: string): string {
+  return name
+    .replace(/^dr\.?\s*/i, '')
+    .replace(/\./g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function extractAppointmentDoctorCode(item: Record<string, unknown>): string {
+  const candidates = [item.doctor_employee_id, item.doctor_code, item.doctor_id].map((value) =>
+    String(value ?? '')
+      .trim()
+      .toUpperCase(),
+  );
+
+  const regalId = candidates.find((value) => /^RH-D\d+$/i.test(value));
+  if (regalId) return regalId;
+
+  return candidates.find(Boolean) ?? '';
+}
+
+/** Strict match — appointments without a doctor binding are never shown. */
+export function appointmentBelongsToDoctor(
+  item: Record<string, unknown>,
+  session: DoctorSession,
+): boolean {
+  const sessionId = session.doctorId.trim().toUpperCase();
+  const itemDocId = extractAppointmentDoctorCode(item);
+
+  if (itemDocId && sessionId && itemDocId === sessionId) {
+    return true;
+  }
+
+  const itemName = normalizeDoctorName(String(item.doctor_name || ''));
+  const sessionName = normalizeDoctorName(session.doctorName);
+
+  if (!itemName || !sessionName) return false;
+
+  if (itemName === sessionName) return true;
+
+  const sessionTokens = sessionName.split(' ').filter((token) => token.length >= 3);
+  const itemTokens = itemName.split(' ').filter((token) => token.length >= 3);
+
+  if (sessionTokens.length === 0 || itemTokens.length === 0) return false;
+
+  const primarySession = sessionTokens[0];
+  const primaryItem = itemTokens[0];
+
+  return (
+    primaryItem === primarySession ||
+    itemName.includes(primarySession) ||
+    sessionName.includes(primaryItem)
+  );
 }

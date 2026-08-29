@@ -1,327 +1,324 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Stethoscope,
-  ShieldCheck,
-  Lock,
+  AlertCircle,
+  ArrowRight,
+  Building2,
+  CheckCircle,
   Eye,
   EyeOff,
-  Loader2,
-  ArrowRight,
-  BadgeCheck,
+  HeartPulse,
+  Lock,
+  Sparkles,
+  Stethoscope,
 } from 'lucide-react';
-import { supabase } from '@/lib/supabaseClient';
-import {
-  DEFAULT_DOCTOR_PASSWORD,
-  authenticateDoctor,
-  formatDoctorLoginOption,
-  loadDoctorProfiles,
-  type DoctorProfileRow,
-} from '@/lib/doctor/doctor-auth-service';
-import {
-  DEFAULT_REGAL_DOCTOR,
-  REGAL_DOCTORS,
-  findRegalDoctor,
-} from '@/lib/doctor/regal-doctors';
-import { doctorToSession, profileToSession, setDoctorSession } from '@/lib/doctor/session';
-import { resolveDoctorContext } from '@/lib/doctor/command-center/doctor-context';
-import { DOCTOR_STORAGE_KEYS, writeJsonStorage } from '@/lib/doctor/storage-keys';
 
-const REMEMBER_KEY = DOCTOR_STORAGE_KEYS.rememberedDoctor;
-const ACTIVE_DOCTOR_KEY = DOCTOR_STORAGE_KEYS.activeDoctor;
+import { authenticateHospitalDoctor } from '@/lib/doctor/hospital-auth';
+import { saveDoctorSession } from '@/lib/doctor/session';
 
-function formatSupabaseError(err: unknown): string {
-  if (!err) return 'Unknown sync error';
-  if (typeof err === 'string') return err;
-  if (err instanceof Error && err.message) return err.message;
-  if (typeof err === 'object') {
-    const e = err as { message?: string; details?: string; hint?: string; code?: string };
-    return [e.message, e.details, e.hint, e.code].filter(Boolean).join(' · ') || 'Supabase sync unavailable';
-  }
-  return 'Supabase sync unavailable';
-}
+const QUICK_CLINICIANS = [
+  { id: 'RH-D01', name: 'Dr. Suriraju V', email: 'dr.suriraju@regalhospital.com', pass: 'Suri@Uro9101' },
+  { id: 'RH-D02', name: 'Dr. Chandrakanth', email: 'dr.kesari@regalhospital.com', pass: 'Kesari@Gen9102' },
+  { id: 'RH-D03', name: 'Dr. Ananya R', email: 'dr.ananya@regalhospital.com', pass: 'Anan@Med9103' },
+] as const;
 
-function readRememberedDoctorId(): string {
-  if (typeof window === 'undefined') return DEFAULT_REGAL_DOCTOR.employeeId;
-  try {
-    const remembered = window.localStorage.getItem(REMEMBER_KEY);
-    if (remembered) return remembered;
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT_REGAL_DOCTOR.employeeId;
-}
-
-function hasRememberedDoctor(): boolean {
-  if (typeof window === 'undefined') return true;
-  try {
-    return Boolean(window.localStorage.getItem(REMEMBER_KEY));
-  } catch {
-    return true;
-  }
-}
+const DOCTOR_ILLUSTRATION =
+  'https://illustrations.popsy.co/teal-doctor.svg';
 
 export default function DoctorLoginPage() {
   const router = useRouter();
-  const [profiles, setProfiles] = useState<DoctorProfileRow[]>([]);
-  const [profilesLoading, setProfilesLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState(readRememberedDoctorId);
-  const [password, setPassword] = useState(DEFAULT_DOCTOR_PASSWORD);
-  const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(hasRememberedDoctor);
-  const [loading, setLoading] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
 
-  useEffect(() => {
-    void (async () => {
-      const rows = await loadDoctorProfiles();
-      setProfiles(rows);
-      setProfilesLoading(false);
-      if (rows.length > 0) {
-        setSelectedId((current) => (rows.some((row) => row.id === current) ? current : rows[0].id));
-      }
-    })();
-  }, []);
+  const [identifier, setIdentifier] = useState('dr.suriraju@regalhospital.com');
+  const [passcode, setPasscode] = useState('Suri@Uro9101');
+  const [showPasscode, setShowPasscode] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const selectedProfile = useMemo(() => {
-    return profiles.find((row) => row.id === selectedId) ?? null;
-  }, [profiles, selectedId]);
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setErrorMessage('');
+    setIsLoading(true);
 
-  const fallbackDoctor = useMemo(() => findRegalDoctor(selectedId) ?? DEFAULT_REGAL_DOCTOR, [selectedId]);
+    try {
+      const result = await authenticateHospitalDoctor(identifier, passcode);
 
-  const persistDoctorSession = (session: ReturnType<typeof profileToSession>) => {
-    setDoctorSession(session);
-    writeJsonStorage(ACTIVE_DOCTOR_KEY, {
-      doctorId: session.employeeId,
-      doctor_name: session.fullName,
-      fullName: session.fullName,
-      employeeId: session.employeeId,
-      department: session.department,
-      signedInAt: session.signedInAt,
-    });
-    writeJsonStorage(DOCTOR_STORAGE_KEYS.doctorSession, session);
-
-    if (typeof window !== 'undefined') {
-      if (remember) {
-        window.localStorage.setItem(REMEMBER_KEY, session.employeeId);
-      } else {
-        window.localStorage.removeItem(REMEMBER_KEY);
-      }
-    }
-  };
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!password.trim()) {
-      setNotice('Enter your access password.');
-      return;
-    }
-
-    setLoading(true);
-    setNotice(null);
-
-    const email = selectedProfile?.email ?? `${fallbackDoctor.employeeId.toLowerCase()}@regal.local`;
-    const auth = await authenticateDoctor(email, password);
-
-    if (!auth.ok || !auth.profile) {
-      if (profiles.length === 0 && password === DEFAULT_DOCTOR_PASSWORD) {
-        const session = doctorToSession(fallbackDoctor, email);
-        persistDoctorSession(session);
-        try {
-          await resolveDoctorContext(session);
-        } catch {
-          /* warm on dashboard */
-        }
-        setLoading(false);
-        router.replace('/doctor/dashboard');
+      if (!result.ok) {
+        setErrorMessage(result.error);
         return;
       }
 
-      setLoading(false);
-      setNotice(auth.error ?? 'Authentication failed.');
-      return;
-    }
+      saveDoctorSession(result.session, rememberMe);
 
-    const session = profileToSession(auth.profile);
-    persistDoctorSession(session);
-
-    try {
-      await resolveDoctorContext(session);
-    } catch {
-      /* UUID map warms on first dashboard load */
-    }
-
-    try {
-      const { error } = await supabase.from('doctor_sessions').upsert(
-        {
-          employee_id: auth.profile.id,
-          doctor_name: auth.profile.name,
-          department: auth.profile.department,
-          signed_in_at: new Date().toISOString(),
-        },
-        { onConflict: 'employee_id' },
-      );
-
-      if (error) {
-        console.warn('Doctor session sync notice:', formatSupabaseError(error));
-      }
+      setTimeout(() => {
+        router.push('/doctor/dashboard');
+      }, 500);
     } catch (err) {
-      console.warn('Doctor session sync notice:', formatSupabaseError(err));
+      console.error('Login error:', err);
+      setErrorMessage(err instanceof Error ? err.message : 'Authentication error occurred.');
     } finally {
-      setLoading(false);
-      router.replace('/doctor/dashboard');
+      setIsLoading(false);
     }
   };
 
-  const rosterCount = profiles.length > 0 ? profiles.length : REGAL_DOCTORS.length;
-
   return (
-    <div className="fixed inset-0 z-50 flex min-h-screen flex-col bg-slate-100 font-sans text-[#2C1929]">
-      <header className="flex items-center justify-between border-b border-slate-200/80 bg-white/90 px-6 py-4 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#2C1929] text-[#D8A657] shadow-md">
-            <Stethoscope className="h-5 w-5" />
-          </div>
+    <div className="flex min-h-screen items-center justify-center bg-[#F0FDF9] p-4 font-sans sm:p-8">
+      <style jsx global>{`
+        @keyframes floatSlow {
+          0%,
+          100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-8px);
+          }
+        }
+        @keyframes floatDelayed {
+          0%,
+          100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(8px);
+          }
+        }
+        @keyframes circularPulse {
+          0%,
+          100% {
+            transform: scale(1);
+            opacity: 0.6;
+          }
+          50% {
+            transform: scale(1.04);
+            opacity: 0.25;
+          }
+        }
+        @keyframes doctorBreathe {
+          0%,
+          100% {
+            transform: translateY(0px) scale(1.02);
+          }
+          50% {
+            transform: translateY(-6px) scale(1.05);
+          }
+        }
+        .anim-badge-1 {
+          animation: floatSlow 4s ease-in-out infinite;
+        }
+        .anim-badge-2 {
+          animation: floatDelayed 4.5s ease-in-out infinite;
+        }
+        .anim-pulse-ring {
+          animation: circularPulse 3.5s ease-in-out infinite;
+        }
+        .anim-doctor-avatar {
+          animation: doctorBreathe 3.5s ease-in-out infinite;
+        }
+      `}</style>
+
+      <div className="grid min-h-[640px] w-full max-w-5xl grid-cols-1 overflow-hidden rounded-3xl border border-teal-100 bg-white shadow-2xl lg:grid-cols-12">
+        <div className="z-10 flex flex-col justify-between bg-white p-8 sm:p-12 lg:col-span-5">
           <div>
-            <h1 className="text-sm font-black tracking-tight text-[#2C1929] md:text-base">
-              Regal Hospital - Doctor Portal
-            </h1>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
-              CuraSync Clinical Access · doctor_profiles auth
+            <div className="mb-8 flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-tr from-teal-600 to-cyan-500 text-white shadow-md shadow-teal-500/20">
+                <Stethoscope className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div>
+                <span className="flex items-center gap-1.5 text-xl font-black tracking-tight text-slate-900">
+                  Regal<span className="font-extrabold text-teal-600">Health</span>
+                </span>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                  EMR Clinician Portal
+                </p>
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <h1 className="text-2xl font-black tracking-tight text-slate-900">Login To Your Station</h1>
+              <p className="mt-1 text-xs text-slate-500">Sign in with hospital-issued clinician credentials</p>
+            </div>
+
+            {errorMessage && (
+              <div className="mb-5 flex items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 p-3 text-xs text-teal-800">
+                <AlertCircle className="h-4 w-4 shrink-0 text-teal-600" aria-hidden="true" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="doctor-identifier"
+                  className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-600"
+                >
+                  Doctor ID or Hospital Email
+                </label>
+                <div className="relative">
+                  <Building2
+                    className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400"
+                    aria-hidden="true"
+                  />
+                  <input
+                    id="doctor-identifier"
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="e.g. dr.suriraju@regalhospital.com or RH-D01"
+                    required
+                    autoComplete="username"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-xs font-semibold text-slate-900 outline-none transition-all focus:border-teal-600 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="doctor-passcode"
+                  className="mb-1.5 block text-[11px] font-bold uppercase tracking-wider text-slate-600"
+                >
+                  Security Passcode
+                </label>
+                <div className="relative">
+                  <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-400" aria-hidden="true" />
+                  <input
+                    id="doctor-passcode"
+                    type={showPasscode ? 'text' : 'password'}
+                    value={passcode}
+                    onChange={(e) => setPasscode(e.target.value)}
+                    placeholder="Enter security passcode"
+                    required
+                    autoComplete="current-password"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-10 text-xs font-semibold text-slate-900 outline-none transition-all focus:border-teal-600 focus:bg-white focus:ring-2 focus:ring-teal-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPasscode((v) => !v)}
+                    className="absolute right-3.5 top-3.5 cursor-pointer text-slate-400 hover:text-slate-600"
+                    aria-label={showPasscode ? 'Hide passcode' : 'Show passcode'}
+                  >
+                    {showPasscode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-1 text-xs">
+                <label className="flex cursor-pointer select-none items-center gap-2 font-medium text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 cursor-pointer rounded accent-teal-600"
+                  />
+                  Remember Session
+                </label>
+                <span className="cursor-pointer font-bold text-teal-600 hover:text-teal-700">Forgot PIN?</span>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="mt-4 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-teal-600 via-teal-700 to-cyan-700 py-3.5 text-xs font-black text-white shadow-lg shadow-teal-600/25 transition-all hover:from-teal-700 hover:to-cyan-800 active:scale-[0.99] disabled:opacity-50"
+              >
+                {isLoading ? (
+                  <span>Authenticating Hospital Records...</span>
+                ) : (
+                  <>
+                    <span>Enter Doctor Workspace</span>
+                    <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+
+          <div className="mt-6 border-t border-slate-100 pt-4">
+            <span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Quick Clinician Switch:
+            </span>
+            <div className="flex flex-wrap gap-2">
+              {QUICK_CLINICIANS.map((doc) => (
+                <button
+                  key={doc.id}
+                  type="button"
+                  onClick={() => {
+                    setIdentifier(doc.email);
+                    setPasscode(doc.pass);
+                  }}
+                  className={`cursor-pointer rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-all ${
+                    identifier === doc.email
+                      ? 'border-teal-500 bg-teal-50 text-teal-800 shadow-xs'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  {doc.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="relative flex flex-col justify-between overflow-hidden bg-gradient-to-tr from-[#005B52] via-[#00897B] to-[#0284C7] p-8 text-white sm:p-12 lg:col-span-7">
+          <div className="pointer-events-none absolute -bottom-20 -right-20 h-80 w-80 rounded-full bg-white/10 blur-2xl" />
+          <div className="pointer-events-none absolute right-10 top-10 h-48 w-48 rounded-full bg-teal-400/20 blur-xl" />
+
+          <div className="z-10 flex items-center justify-between">
+            <div className="flex items-center gap-2 rounded-full border border-white/20 bg-white/15 px-3.5 py-1.5 text-xs font-bold shadow-inner backdrop-blur-md">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-300" />
+              <span>Hospital Cloud Online</span>
+            </div>
+            <span className="font-mono text-xs font-bold text-teal-100 opacity-90">HIPAA & ABDM Protected</span>
+          </div>
+
+          <div className="relative z-10 my-auto flex items-center justify-center py-4">
+            <div className="anim-pulse-ring pointer-events-none absolute h-72 w-72 rounded-full border-2 border-cyan-300/30 sm:h-84 sm:w-84" />
+            <div className="pointer-events-none absolute h-80 w-80 rounded-full border border-sky-400/20 sm:h-92 sm:w-92" />
+
+            <div className="relative flex h-64 w-64 items-center justify-center rounded-full border-4 border-white/40 bg-gradient-to-b from-[#38BDF8] via-[#0284C7] to-[#0369A1] p-3 shadow-2xl sm:h-76 sm:w-76">
+              <div className="relative flex h-full w-full items-end justify-center overflow-hidden rounded-full bg-gradient-to-b from-sky-100 via-white to-sky-50 shadow-inner">
+                <div className="anim-doctor-avatar flex h-[95%] w-[95%] translate-y-2 items-center justify-center">
+                  <Stethoscope className="h-24 w-24 text-teal-600 drop-shadow-lg sm:h-32 sm:w-32" strokeWidth={1.25} />
+                </div>
+                <div className="absolute bottom-5 right-6 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-cyan-600 shadow-lg">
+                  <span className="text-xs font-black leading-none text-white">+</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="anim-badge-1 absolute -left-2 -top-3 z-20 flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-slate-900 shadow-2xl sm:left-2 sm:p-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-teal-100 bg-teal-50 text-teal-600">
+                <HeartPulse className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Live OPD Sync</p>
+                <p className="text-xs font-black text-slate-900">0s Prescription Sync</p>
+              </div>
+            </div>
+
+            <div className="anim-badge-2 absolute -bottom-3 -right-2 z-20 flex items-center gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-slate-900 shadow-2xl sm:right-2 sm:p-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-100 bg-cyan-50 text-cyan-700">
+                <CheckCircle className="h-5 w-5" aria-hidden="true" />
+              </div>
+              <div>
+                <p className="text-[9px] font-black uppercase tracking-wider text-slate-400">Data Isolation</p>
+                <p className="text-xs font-black text-slate-900">Private Patient Dossier</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="z-10 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-md">
+            <h4 className="flex items-center gap-1.5 text-xs font-extrabold text-white">
+              <Sparkles className="h-3.5 w-3.5 text-cyan-200" aria-hidden="true" />
+              Zero-Cross Data Security Guarantee
+            </h4>
+            <p className="mt-1 text-[11px] leading-relaxed text-teal-100">
+              Every clinician logs into an encrypted, isolated workstation. Appointments booked for other doctors
+              are strictly shielded.
             </p>
           </div>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-emerald-800">
-          <BadgeCheck className="h-3.5 w-3.5" />
-          HIPAA Compliant Session
-        </span>
-      </header>
-
-      <main className="flex flex-1 items-center justify-center p-6">
-        <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
-          <div className="mb-6 flex items-start justify-between gap-4 border-b border-slate-100 pb-5">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-purple-700">
-                Clinician Authentication
-              </p>
-              <h2 className="mt-1 text-2xl font-black text-[#2C1929]">Enter Clinical Workspace</h2>
-              <p className="mt-1 text-xs font-semibold text-slate-500">
-                Select your verified Regal Hospital profile · test password {DEFAULT_DOCTOR_PASSWORD}
-              </p>
-            </div>
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-[#2C1929]/5 text-[#2C1929]">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-5">
-            <div>
-              <label
-                htmlFor="clinician-profile"
-                className="text-[10px] font-black uppercase tracking-wider text-[#2C1929]"
-              >
-                Select Clinician Profile *
-              </label>
-              <select
-                id="clinician-profile"
-                required
-                value={selectedId}
-                onChange={(e) => setSelectedId(e.target.value)}
-                disabled={profilesLoading}
-                className="mt-1.5 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-xs font-bold text-[#2C1929] outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-600 disabled:opacity-60"
-              >
-                {profiles.length > 0
-                  ? profiles.map((profile) => (
-                      <option key={profile.id} value={profile.id}>
-                        {formatDoctorLoginOption(profile)}
-                      </option>
-                    ))
-                  : REGAL_DOCTORS.map((doctor) => (
-                      <option key={doctor.employeeId} value={doctor.employeeId}>
-                        {doctor.name} ({doctor.employeeId}) · {doctor.department}
-                      </option>
-                    ))}
-              </select>
-              <p className="mt-1.5 text-[11px] font-semibold text-slate-500">
-                {rosterCount} verified clinicians ·{' '}
-                {selectedProfile?.department ?? fallbackDoctor.department}
-                {selectedProfile?.email ? ` · ${selectedProfile.email}` : ''}
-              </p>
-            </div>
-
-            <div>
-              <label
-                htmlFor="access-password"
-                className="text-[10px] font-black uppercase tracking-wider text-[#2C1929]"
-              >
-                Password *
-              </label>
-              <div className="relative mt-1.5">
-                <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  id="access-password"
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  minLength={4}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="RegalDoc@2026"
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3.5 pl-10 pr-12 text-xs font-bold text-[#2C1929] outline-none transition focus:border-purple-600 focus:ring-2 focus:ring-purple-600"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-200 hover:text-[#2C1929]"
-                  aria-label={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-            </div>
-
-            <label className="flex cursor-pointer items-center gap-2.5 text-xs font-bold text-slate-600">
-              <input
-                type="checkbox"
-                checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-purple-700 focus:ring-purple-600"
-              />
-              Remember Profile on this terminal
-            </label>
-
-            {notice ? (
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-[11px] font-bold text-amber-900">
-                {notice}
-              </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={loading || profilesLoading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#2C1929] py-4 text-xs font-black uppercase tracking-wide text-white shadow-lg transition hover:bg-[#3D2339] disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin text-[#D8A657]" />
-                  Opening Workspace…
-                </>
-              ) : (
-                <>
-                  Enter Clinical Workspace
-                  <ArrowRight className="h-4 w-4 text-[#D8A657]" />
-                </>
-              )}
-            </button>
-          </form>
-
-          <div className="mt-6 flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-bold text-slate-600">
-            <ShieldCheck className="h-4 w-4 shrink-0 text-purple-700" />
-            Credentials validated against Supabase doctor_profiles · RH-D01 through RH-D41
-          </div>
-        </div>
-      </main>
+      </div>
     </div>
   );
 }

@@ -3,32 +3,21 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Stethoscope } from 'lucide-react';
+import { getDoctorSession } from '@/lib/doctor/session';
 
 export default function DoctorIndexPage() {
   const router = useRouter();
   const [message, setMessage] = useState('Checking clinician session…');
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      if (typeof window === 'undefined') return;
-
-      try {
-        const savedSession =
-          window.localStorage.getItem('active_doctor_session') ||
-          window.localStorage.getItem('curasync_active_doctor');
-        if (savedSession) {
-          setMessage('Opening clinical workspace…');
-          router.replace('/doctor/dashboard/');
-        } else {
-          setMessage('Redirecting to login…');
-          router.replace('/doctor/login/');
-        }
-      } catch {
-        router.replace('/doctor/login/');
-      }
-    }, 0);
-
-    return () => window.clearTimeout(timer);
+    const session = getDoctorSession();
+    if (session?.doctorId) {
+      setMessage('Opening clinical workspace…');
+      router.replace('/doctor/dashboard');
+    } else {
+      setMessage('Redirecting to login…');
+      router.replace('/doctor/login');
+    }
   }, [router]);
 
   return (

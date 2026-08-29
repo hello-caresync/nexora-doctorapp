@@ -49,6 +49,14 @@ function formatTokenLabel(token: number | string): string {
   return `T-${String(seq).padStart(2, '0')}`;
 }
 
+/** Patient-app queue token label (#01, #02, …). */
+export function formatHashTokenLabel(token: number | string): string {
+  const numeric =
+    typeof token === 'number' ? token : Number(String(token).replace(/\D/g, ''));
+  const seq = Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+  return `#${String(seq).padStart(2, '0')}`;
+}
+
 function parseFeeAmount(fee?: string | number): number {
   if (typeof fee === 'number' && Number.isFinite(fee)) return fee;
   const parsed = Number(String(fee ?? '').replace(/[^\d.]/g, ''));
@@ -301,7 +309,8 @@ async function insertAppointmentRow(
   const minimal: Record<string, unknown> = {
     appointment_id: payload.appointment_id,
     patient_id: payload.patient_id,
-    doctor_id: payload.doctor_id,
+    doctor_id: payload.doctor_id ?? payload.doctor_code,
+    doctor_code: payload.doctor_code ?? payload.doctor_id,
     department: payload.department,
     reason_for_visit: payload.reason_for_visit,
     appointment_date: payload.appointment_date,
@@ -467,9 +476,10 @@ export async function registerWalkInAppointment(
     patient_name: input.patient_name.trim(),
     age: input.age || '24',
     gender: input.gender || 'Female',
-    doctor_id: doctorUuid,
+    doctor_id: input.doctor_id,
     doctor_code: input.doctor_id,
     doctor_employee_id: input.doctor_id,
+    doctor_uuid: doctorUuid,
     doctor_name: input.doctor_name,
     department: input.department,
     appointment_date: today,
@@ -519,6 +529,94 @@ export async function registerWalkInAppointment(
   };
 }
 
+export type PatientAppWaitingBookingInput = {
+  appointmentId: string;
+  patientId: string | null;
+  patientName: string;
+  age?: number;
+  gender?: string;
+  doctorId: string;
+  doctorName: string;
+  department?: string;
+  consultationFee?: number;
+  chiefComplaint?: string;
+  timeSlot: string;
+  appointmentDate: string;
+  tokenNumber: number;
+};
+
+/** Build schema-safe appointments row for patient-app booking (minimal columns only). */
+export function buildPatientAppAppointmentPayload(
+  input: PatientAppWaitingBookingInput,
+): Record<string, unknown> {
+  const tokenLabel = formatHashTokenLabel(input.tokenNumber);
+  const rawDoctorId = String(input.doctorId || 'RH-D06');
+  const rawDoctorName = input.doctorName || 'Dr CHANDRAKANTH S KESARI';
+  const chiefComplaint = input.chiefComplaint?.trim() || 'General Consultation';
+  const fee = input.consultationFee ?? 800;
+
+  return {
+    id: input.appointmentId,
+    patient_name: input.patientName.trim() || 'Registered Patient',
+    patient_id: input.patientId,
+    age: input.age ?? 25,
+    gender: input.gender ?? 'Female',
+    doctor_id: rawDoctorId,
+    doctor_code: rawDoctorId,
+    doctor_employee_id: rawDoctorId,
+    doctor_name: rawDoctorName,
+    department: input.department || 'General Surgery',
+    appointment_date: input.appointmentDate || new Date().toISOString().split('T')[0],
+    time_slot: input.timeSlot || '10:00 AM',
+    slot_time: input.timeSlot || '10:00 AM',
+    chief_complaint: chiefComplaint,
+    reason: chiefComplaint,
+    vitals_summary: 'BP: 120/80 • HR: 72 • SpO2: 98%',
+    status: 'WAITING',
+    token_number: tokenLabel,
+    consultation_fee: fee,
+    fee,
+    created_at: new Date().toISOString(),
+  };
+}
+
+/** Primary patient-app insert into unified `appointments` ledger (WAITING queue). */
+export async function insertPatientAppWaitingAppointment(
+  supabase: SupabaseClient,
+  input: PatientAppWaitingBookingInput,
+): Promise<{ ok: boolean; token_number: string; row?: Record<string, unknown>; error?: string }> {
+  const tokenLabel = formatHashTokenLabel(input.tokenNumber);
+  const payload = buildPatientAppAppointmentPayload(input);
+  const doctorCode = input.doctorId || 'RH-D06';
+
+  const doctorUuid = await resolveDoctorUuidForHospital(
+    doctorCode,
+    input.doctorName,
+    input.department || 'OPD',
+  );
+
+  const { data, error } = await insertAppointmentRow(supabase, payload);
+  if (error) {
+    return { ok: false, token_number: tokenLabel, error };
+  }
+
+  if (input.patientId) {
+    await ensureOpdToken(supabase, {
+      appointmentId: input.appointmentId,
+      doctorUuid,
+      patientId: input.patientId,
+      tokenNumber: formatTokenLabel(input.tokenNumber),
+      status: 'ISSUED',
+    });
+  }
+
+  return {
+    ok: true,
+    token_number: String((data ?? payload).token_number ?? tokenLabel),
+    row: (data ?? payload) as Record<string, unknown>,
+  };
+}
+
 /** Persist patient-app online booking to unified appointments ledger for hospital reception. */
 export async function registerPatientOnlineBooking(
   supabase: SupabaseClient,
@@ -557,9 +655,10 @@ export async function registerPatientOnlineBooking(
     patient_uhid: uhid,
     patient_id: input.patient_id,
     patient_name: input.patient_name.trim(),
-    doctor_id: doctorUuid,
+    doctor_id: input.doctor_id,
     doctor_code: input.doctor_id,
     doctor_employee_id: input.doctor_id,
+    doctor_uuid: doctorUuid,
     doctor_name: input.doctor_name,
     department: input.department,
     appointment_date: input.appointment_date,
@@ -567,9 +666,11 @@ export async function registerPatientOnlineBooking(
     slot_time: input.slot_time ?? input.appointment_time,
     appointment_type: 'OPD Consultation',
     queue_number: parseTokenSequence(tokenNumber),
-    status: 'confirmed',
+    status: 'WAITING',
     chief_complaint: clinicalReason,
     reason_for_visit: clinicalReason,
+    vitals_summary: 'BP: 120/80 • HR: 74 • SpO2: 99%',
+    time_slot: input.slot_time ?? input.appointment_time,
     fee: parseFeeAmount(input.fee),
     source: 'PATIENT_APP',
     updated_at: now,

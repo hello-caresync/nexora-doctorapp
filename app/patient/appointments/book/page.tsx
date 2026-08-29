@@ -6,12 +6,12 @@ import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
 import {
   calculateNextOpdTokenNumber,
-  formatHashTokenLabel,
 } from '@/lib/hospital/operations/appointment-sync';
 import {
-  PATIENT_APPOINTMENTS_UUID,
-  resolvePatientDbId,
-} from '@/lib/patient/constants';
+  getActivePatientId,
+  getActivePatientName,
+  persistActivePatientNode,
+} from '@/lib/patient/active-patient-node';
 import {
   Stethoscope,
   Calendar,
@@ -86,16 +86,7 @@ const ALL_41_DOCTORS: DoctorDirectoryItem[] = [
 
 const REGAL_HOSPITAL = 'Regal Hospital';
 const PATIENT_BOOKING_SOURCE = 'patient_app';
-const LEGACY_PATIENT_UUID_FALLBACK = '00000000-0000-0000-0000-000000009021';
-
-/** Static registered-patient UUID fallback when Web Crypto is unavailable. */
-const STATIC_PATIENT_UUID_FALLBACK = PATIENT_APPOINTMENTS_UUID;
-
-function isValidStandardUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  );
-}
+const PATIENT_BOOKING_STATUS = 'SCHEDULED';
 
 function isValidUUID(value: unknown): value is string {
   return (
@@ -104,9 +95,8 @@ function isValidUUID(value: unknown): value is string {
   );
 }
 
-function resolveRegisteredPatientUuid(sessionPatientId?: string | null): string {
-  const resolved = resolvePatientDbId(sessionPatientId);
-  return isValidStandardUuid(resolved) ? resolved : STATIC_PATIENT_UUID_FALLBACK;
+function resolveBookingPatientId(): string {
+  return getActivePatientId();
 }
 
 function stripRelationshipTag(label: string): string {
@@ -163,14 +153,6 @@ async function calculateNextTokenNumber(
   }
 }
 
-function resolveBookingPatientId(existingPatientId: string): string {
-  if (isValidUUID(existingPatientId)) return existingPatientId.trim();
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return LEGACY_PATIENT_UUID_FALLBACK;
-}
-
 function isSchemaCacheError(message: string): boolean {
   const lower = message.toLowerCase();
   return (
@@ -182,7 +164,13 @@ function isSchemaCacheError(message: string): boolean {
   );
 }
 
-interface ComprehensiveAppointmentInput {
+/** Supabase token_label column — e.g. "Token #3". */
+function formatBookingTokenLabel(tokenNumber: number): string {
+  const seq = Number.isFinite(tokenNumber) && tokenNumber > 0 ? tokenNumber : 1;
+  return `Token #${seq}`;
+}
+
+interface FullyAliasedBookingInput {
   patientId: string;
   patientName: string;
   doctorName: string;
@@ -193,68 +181,52 @@ interface ComprehensiveAppointmentInput {
   consultationFee: string;
   reason: string;
   tokenNumber: number;
-  tokenLabel: string;
-  createdAt: string;
+  nowIso: string;
 }
 
-/** All alias variations for patient_appointments + appointments schema compatibility. */
-function buildComprehensiveAppointmentPayload(
-  input: ComprehensiveAppointmentInput,
-): Record<string, unknown> {
-  const doctorCode = String(input.doctorCode || 'RH-D01').trim().toUpperCase();
+/** Canonical Supabase insert — every column alias variation in one object. */
+function buildFullyAliasedBookingPayload(input: FullyAliasedBookingInput): Record<string, unknown> {
+  const tokenString = formatBookingTokenLabel(input.tokenNumber);
+  const patientName = input.patientName.trim();
+  const doctorCode = String(input.doctorCode || '').trim().toUpperCase();
   const doctorName = input.doctorName.trim();
-  const patientName = input.patientName.trim() || 'Patient';
-  const clinicalReason = input.reason.trim() || 'General OPD Consultation';
-  const slotTime = input.slotTime || '10:00 AM';
-  const feeDisplay = input.consultationFee || '₹800';
+  const clinicalReason = input.reason.trim();
+  const slotTime = input.slotTime;
+  const feeDisplay = input.consultationFee;
+  const seq = Number.isFinite(input.tokenNumber) && input.tokenNumber > 0 ? input.tokenNumber : 1;
 
   return {
-    // Patient identity — both name column aliases
     patient_id: input.patientId,
     name: patientName,
     patient_name: patientName,
-
-    // Clinician routing (RH-D## + name aliases)
     doctor_name: doctorName,
     doctor_code: doctorCode,
     doctor_id: doctorCode,
     doctor_employee_id: doctorCode,
-
-    // Facility & department
     department: input.department,
     hospital_name: REGAL_HOSPITAL,
-
-    // Scheduling (all time-slot column aliases)
     appointment_date: input.appointmentDate,
     slot_time: slotTime,
     appointment_time: slotTime,
     time_slot: slotTime,
-
-    // Fee (display string on both fee columns for patient_appointments compatibility)
     fee: feeDisplay,
     consultation_fee: feeDisplay,
-
-    // Clinical intake (all complaint column aliases)
     reason: clinicalReason,
     chief_complaint: clinicalReason,
     reason_for_visit: clinicalReason,
-
-    // Queue & token
-    token_number: input.tokenNumber,
-    token_label: input.tokenLabel,
-    queue_number: input.tokenNumber,
-    status: 'SCHEDULED',
-    queue_status: 'SCHEDULED',
-
-    // Metadata
+    token_number: seq,
+    queue_number: seq,
+    token_label: tokenString,
     source: PATIENT_BOOKING_SOURCE,
     booking_source: PATIENT_BOOKING_SOURCE,
-    vitals_summary: 'BP: 120/80 • HR: 72 • SpO2: 98%',
-    created_at: input.createdAt,
-    updated_at: input.createdAt,
+    status: PATIENT_BOOKING_STATUS,
+    queue_status: PATIENT_BOOKING_STATUS,
+    created_at: input.nowIso,
+    updated_at: input.nowIso,
   };
 }
 
+/** Token column aliases — token_number, queue_number, token_label. */
 function buildPatientAppointmentPayload(input: {
   patientId: string;
   patientName: string;
@@ -266,25 +238,9 @@ function buildPatientAppointmentPayload(input: {
   consultationFee: string;
   reason: string;
   tokenNumber: number;
-  tokenLabel: string;
-  createdAt: string;
+  nowIso: string;
 }): Record<string, unknown> {
-  const patientName = input.patientName.trim() || 'Patient';
-  const feeDisplay = input.consultationFee || '₹800';
-
-  return {
-    ...buildComprehensiveAppointmentPayload({ ...input, patientName }),
-    name: patientName,
-    patient_name: patientName,
-    fee: feeDisplay,
-    consultation_fee: feeDisplay,
-    token_number: input.tokenNumber,
-    queue_number: input.tokenNumber,
-    token_label: input.tokenLabel,
-    source: PATIENT_BOOKING_SOURCE,
-    queue_status: 'SCHEDULED',
-    created_at: input.createdAt,
-  };
+  return buildFullyAliasedBookingPayload(input);
 }
 
 function buildAppointmentsLedgerPayload(input: {
@@ -298,25 +254,33 @@ function buildAppointmentsLedgerPayload(input: {
   consultationFee: string;
   reason: string;
   tokenNumber: number;
-  tokenLabel: string;
-  createdAt: string;
+  nowIso: string;
 }): Record<string, unknown> {
-  const patientName = input.patientName.trim() || 'Patient';
-  const feeDisplay = input.consultationFee || '₹800';
-  const feeNumeric = Number(String(feeDisplay).replace(/[^\d.]/g, '')) || 800;
+  const feeDisplay = input.consultationFee;
+  const feeNumeric = Number(String(feeDisplay).replace(/[^\d.]/g, '')) || 0;
 
   return {
-    ...buildComprehensiveAppointmentPayload({ ...input, patientName }),
-    name: patientName,
-    patient_name: patientName,
-    fee: feeDisplay,
+    ...buildFullyAliasedBookingPayload(input),
     consultation_fee: feeNumeric,
-    age: 25,
-    gender: 'Female',
-    token_number: input.tokenNumber,
-    queue_number: input.tokenNumber,
-    token_label: input.tokenLabel,
+  };
+}
+
+function buildConfirmedLocalMirrorRecord(
+  patientPayload: Record<string, unknown>,
+  appointmentsPayload: Record<string, unknown>,
+  nowIso: string,
+  savedRecord?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  return {
+    ...patientPayload,
+    ...appointmentsPayload,
+    ...(savedRecord ?? {}),
     source: PATIENT_BOOKING_SOURCE,
+    booking_source: PATIENT_BOOKING_SOURCE,
+    status: PATIENT_BOOKING_STATUS,
+    queue_status: PATIENT_BOOKING_STATUS,
+    created_at: nowIso,
+    updated_at: nowIso,
   };
 }
 
@@ -353,14 +317,13 @@ export default function BookAppointmentPage() {
   const searchParams = useSearchParams();
 
   // PATIENT SELECTION (SELF + LINKED FAMILY MEMBERS)
-  const [selectedPatientName, setSelectedPatientName] = useState<string>('Aishwarya D S (Self)');
+  const [selectedPatientName, setSelectedPatientName] = useState<string>('');
   const [patientOptions, setPatientOptions] = useState<FamilyMemberOption[]>([]);
 
-  // CLINICIAN & CLINICAL DETAILS
-  const [selectedDoctorName, setSelectedDoctorName] = useState<string>('Dr. Chandrakanth S. Kesari');
-  const [selectedDoctorCode, setSelectedDoctorCode] = useState<string>('RH-D02');
-  const [selectedDept, setSelectedDept] = useState<string>('General Surgery');
-  const [consultationFee, setConsultationFee] = useState<string>('₹800');
+  const [selectedDoctorName, setSelectedDoctorName] = useState<string>('');
+  const [selectedDoctorCode, setSelectedDoctorCode] = useState<string>('');
+  const [selectedDept, setSelectedDept] = useState<string>('');
+  const [consultationFee, setConsultationFee] = useState<string>('');
   const [reason, setReason] = useState<string>('');
 
   // SCHEDULING DETAILS
@@ -371,7 +334,7 @@ export default function BookAppointmentPage() {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [success, setSuccess] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [patientId, setPatientId] = useState<string>(STATIC_PATIENT_UUID_FALLBACK);
+  const [patientId, setPatientId] = useState<string>('');
   const [bookedSummary, setBookedSummary] = useState<{
     token: number;
     doctor: string;
@@ -396,72 +359,59 @@ export default function BookAppointmentPage() {
   }, [searchParams]);
 
   const loadPatientAndFamilyOptions = async () => {
-    let primaryName = 'Aishwarya D S';
+    const activePatientId = getActivePatientId();
+    let primaryName = getActivePatientName();
     let familyMembersList: FamilyMemberOption[] = [];
-    let resolvedPatientId = STATIC_PATIENT_UUID_FALLBACK;
 
     if (typeof window !== 'undefined') {
-      const storedName = localStorage.getItem('patient_full_name');
       const savedProfile = localStorage.getItem('curasync_patient_profile');
-      const sessionPatientId =
-        localStorage.getItem('patient_id') ??
-        localStorage.getItem('curasync_patient_id') ??
-        undefined;
-
-      resolvedPatientId = resolveRegisteredPatientUuid(sessionPatientId);
-
-      if (storedName) primaryName = storedName;
 
       if (savedProfile) {
         try {
           const parsed = JSON.parse(savedProfile) as {
             full_name?: string;
             family_members?: FamilyMemberOption[];
-            id?: string;
-            patient_id?: string;
           };
           if (parsed.full_name) primaryName = parsed.full_name;
           if (Array.isArray(parsed.family_members)) {
             familyMembersList = parsed.family_members;
           }
-          resolvedPatientId = resolveRegisteredPatientUuid(
-            parsed.id ?? parsed.patient_id ?? sessionPatientId,
-          );
         } catch {
-          /* use cached defaults */
+          /* use active node name */
         }
       }
     }
 
-    try {
-      const profileQueries = await Promise.all([
-        supabase
-          .from('patient_profiles')
-          .select('id, patient_id, full_name, family_members')
-          .eq('id', resolvedPatientId)
-          .maybeSingle(),
-        supabase
-          .from('patient_profiles')
-          .select('id, patient_id, full_name, family_members')
-          .eq('patient_id', resolvedPatientId)
-          .maybeSingle(),
-      ]);
+    if (isValidUUID(activePatientId)) {
+      try {
+        const profileQueries = await Promise.all([
+          supabase
+            .from('patient_profiles')
+            .select('id, patient_id, full_name, family_members')
+            .eq('id', activePatientId)
+            .maybeSingle(),
+          supabase
+            .from('patient_profiles')
+            .select('id, patient_id, full_name, family_members')
+            .eq('patient_id', activePatientId)
+            .maybeSingle(),
+        ]);
 
-      const profileRecord =
-        profileQueries.find((result) => !result.error && result.data)?.data ?? null;
+        const profileRecord =
+          profileQueries.find((result) => !result.error && result.data)?.data ?? null;
 
-      if (profileRecord) {
-        if (profileRecord.full_name) primaryName = String(profileRecord.full_name);
-        if (Array.isArray(profileRecord.family_members)) {
-          familyMembersList = profileRecord.family_members as FamilyMemberOption[];
+        if (profileRecord) {
+          if (profileRecord.full_name) primaryName = String(profileRecord.full_name);
+          if (Array.isArray(profileRecord.family_members)) {
+            familyMembersList = profileRecord.family_members as FamilyMemberOption[];
+          }
         }
-        resolvedPatientId = resolveRegisteredPatientUuid(
-          String(profileRecord.id ?? profileRecord.patient_id ?? resolvedPatientId),
-        );
+      } catch {
+        console.warn('Profile sync unavailable');
       }
-    } catch {
-      console.warn('Profile sync fallback active');
     }
+
+    persistActivePatientNode(activePatientId, primaryName);
 
     const options: FamilyMemberOption[] = [
       { id: 'self', name: `${primaryName} (Self)`, relation: 'Self' },
@@ -472,7 +422,7 @@ export default function BookAppointmentPage() {
       })),
     ];
 
-    setPatientId(resolvedPatientId);
+    setPatientId(activePatientId);
     setPatientOptions(options);
     setSelectedPatientName(options[0]?.name ?? `${primaryName} (Self)`);
   };
@@ -500,31 +450,39 @@ export default function BookAppointmentPage() {
     try {
       const cleanPatientName = stripRelationshipTag(selectedPatientName);
       const doctorEntry = findDoctorDirectoryEntry(selectedDoctorName);
-      const rawDoctorName =
-        selectedDoctorName || doctorEntry?.name || 'Dr CHANDRAKANTH S KESARI';
-      const rawDoctorCode = (
-        selectedDoctorCode ||
-        doctorEntry?.id ||
-        'RH-D01'
-      )
-        .trim()
-        .toUpperCase();
-      const selectedTime = slotTime || '10:00 AM';
+
+      if (!cleanPatientName.trim()) {
+        setErrorMessage('Select a registered patient before booking.');
+        toast.error('Patient identity is required.');
+        return;
+      }
+
+      if (!selectedDoctorName.trim() || !selectedDoctorCode.trim()) {
+        setErrorMessage('Select a consulting doctor before booking.');
+        toast.error('Doctor selection is required.');
+        return;
+      }
+
+      const rawDoctorName = selectedDoctorName;
+      const rawDoctorCode = selectedDoctorCode.trim().toUpperCase();
+      const selectedTime = slotTime;
       const calculatedToken = await calculateNextTokenNumber(
         rawDoctorCode,
         rawDoctorName,
         appointmentDate,
       );
-      const tokenLabel = formatHashTokenLabel(calculatedToken);
-      const clinicalReason = reason.trim() || 'General OPD Consultation';
-      const createdAt = new Date().toISOString();
-      const resolvedPatientId = resolveBookingPatientId(patientId);
-      const department = selectedDept || doctorEntry?.department || 'General Surgery';
+      const tokenString = formatBookingTokenLabel(calculatedToken);
+      const clinicalReason = reason.trim();
+      const nowIso = new Date().toISOString();
+      const resolvedPatientId = resolveBookingPatientId();
+      const department = selectedDept || doctorEntry?.department || '';
       const resolvedDate = appointmentDate || new Date().toISOString().split('T')[0];
+
+      persistActivePatientNode(resolvedPatientId, cleanPatientName);
 
       const patientPayload = buildPatientAppointmentPayload({
         patientId: resolvedPatientId,
-        patientName: cleanPatientName.trim() || 'Patient',
+        patientName: cleanPatientName,
         doctorName: rawDoctorName,
         doctorCode: rawDoctorCode,
         department,
@@ -533,13 +491,12 @@ export default function BookAppointmentPage() {
         consultationFee,
         reason: clinicalReason,
         tokenNumber: calculatedToken,
-        tokenLabel,
-        createdAt,
+        nowIso,
       });
 
       const appointmentsPayload = buildAppointmentsLedgerPayload({
         patientId: resolvedPatientId,
-        patientName: cleanPatientName.trim() || 'Patient',
+        patientName: cleanPatientName,
         doctorName: rawDoctorName,
         doctorCode: rawDoctorCode,
         department,
@@ -548,8 +505,7 @@ export default function BookAppointmentPage() {
         consultationFee,
         reason: clinicalReason,
         tokenNumber: calculatedToken,
-        tokenLabel,
-        createdAt,
+        nowIso,
       });
 
       console.log('Sending patient_appointments payload to Supabase:', patientPayload);
@@ -605,13 +561,9 @@ export default function BookAppointmentPage() {
           !patientErrorMessage || isSchemaCacheError(patientErrorMessage);
 
         if (canFallbackLocally) {
-          mirrorAppointmentToLocalStorage({
-            ...patientPayload,
-            ...appointmentsPayload,
-            source: PATIENT_BOOKING_SOURCE,
-            status: 'SCHEDULED',
-            queue_status: 'SCHEDULED',
-          });
+          mirrorAppointmentToLocalStorage(
+            buildConfirmedLocalMirrorRecord(patientPayload, appointmentsPayload, nowIso),
+          );
           savedRecord = patientPayload;
           persistenceSource = 'local';
         } else {
@@ -620,14 +572,14 @@ export default function BookAppointmentPage() {
           return;
         }
       } else {
-        mirrorAppointmentToLocalStorage({
-          ...patientPayload,
-          ...appointmentsPayload,
-          ...(savedRecord ?? {}),
-          source: PATIENT_BOOKING_SOURCE,
-          status: 'SCHEDULED',
-          queue_status: 'SCHEDULED',
-        });
+        mirrorAppointmentToLocalStorage(
+          buildConfirmedLocalMirrorRecord(
+            patientPayload,
+            appointmentsPayload,
+            nowIso,
+            savedRecord,
+          ),
+        );
       }
 
       setBookedSummary({
@@ -639,9 +591,9 @@ export default function BookAppointmentPage() {
       setSuccess(true);
 
       if (persistenceSource === 'local') {
-        toast.warning(`Appointment saved locally. Token: ${tokenLabel}`);
+        toast.warning(`Appointment saved locally. Token: ${tokenString}`);
       } else {
-        toast.success(`Appointment confirmed! Token: ${tokenLabel}`);
+        toast.success(`Appointment confirmed! Token: ${tokenString}`);
       }
 
       setTimeout(() => {
@@ -682,7 +634,7 @@ export default function BookAppointmentPage() {
                 <p>
                   Token:{' '}
                   <span className="font-black text-[#227B6B]">
-                    {formatHashTokenLabel(bookedSummary.token)}
+                    {formatBookingTokenLabel(bookedSummary.token)}
                   </span>
                 </p>
                 <p>

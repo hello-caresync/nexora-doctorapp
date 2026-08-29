@@ -22,7 +22,7 @@ export type EcosystemNavLayer = {
   sections: EcosystemNavSection[];
 };
 
-export const HOSPITAL_DASHBOARD_HREF = '/hospital/dashboard';
+export const HOSPITAL_DASHBOARD_HREF = '/dashboard';
 export const HOSPITAL_LOGIN_HREF = '/hospital/login';
 
 export const ECOSYSTEM_NAV_LAYERS: EcosystemNavLayer[] = [

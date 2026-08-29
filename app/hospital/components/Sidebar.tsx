@@ -42,7 +42,7 @@ export default function Sidebar() {
     {
       category: "CLINICAL OPERATIONS",
       items: [
-        { title: "Dashboard", path: "/hospital/dashboard", icon: LayoutDashboard },
+        { title: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
         { title: "Appointments", path: "/hospital/appointments", icon: Calendar },
         { title: "My Patients", path: "/hospital/patients", icon: Users },
         { title: "Active Consultation", path: "/hospital/consultation", icon: Stethoscope },

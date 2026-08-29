@@ -3,6 +3,16 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  Activity,
+  ArrowRight,
+  Building2,
+  Lock,
+  Mail,
+  ShieldCheck,
+  Stethoscope,
+  Users,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useAuth } from '../../context/AuthProvider';
@@ -14,31 +24,80 @@ import {
   resolveMemberPostLoginRoute,
 } from '@/lib/auth/hospital/member-auth';
 import type { LoginPortalRole } from '@/lib/auth/hospital/member-types';
+import {
+  mapMemberRoleToStaffType,
+  recordRealStaffLogin,
+  resolveCredentialHospitalId,
+  resolveStaffPortalAccess,
+} from '@/lib/recordStaffLogin';
 import AuthLoginShell, {
   AuthAlert,
   AuthField,
   AuthPrimaryButton,
 } from './AuthLoginShell';
 
-const PORTAL_ROLES: { value: LoginPortalRole; label: string; hint: string }[] = [
-  { value: 'Staff', label: 'Staff', hint: 'Nurse · Reception · Billing · Pharmacy' },
-  { value: 'Doctor', label: 'Doctor', hint: 'Clinical workspace' },
-  { value: 'Admin', label: 'Admin', hint: 'Hospital administration' },
-];
+const ROLE_DEFAULTS: Record<LoginPortalRole, string> = {
+  Staff: 'staff@curasync.com',
+  Doctor: 'doctor@curasync.com',
+  Admin: 'hospital@curasync.com',
+};
+
+const ROLE_META: Record<
+  LoginPortalRole,
+  {
+    title: string;
+    hint: string;
+    icon: typeof Users;
+    glow: string;
+    tagColor: string;
+    gradientBtn: string;
+    textClass: string;
+  }
+> = {
+  Staff: {
+    title: 'STAFF',
+    hint: 'Nurse/Desk',
+    icon: Users,
+    glow: 'from-cyan-500/40 via-teal-500/30 to-blue-600/40',
+    tagColor: 'text-cyan-400 border-cyan-500/40 bg-cyan-500/10',
+    gradientBtn: 'from-cyan-500 via-teal-400 to-emerald-400',
+    textClass: 'text-slate-950',
+  },
+  Doctor: {
+    title: 'DOCTOR',
+    hint: 'Clinical OPD',
+    icon: Stethoscope,
+    glow: 'from-emerald-500/40 via-cyan-500/30 to-teal-600/40',
+    tagColor: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+    gradientBtn: 'from-emerald-400 via-teal-400 to-cyan-400',
+    textClass: 'text-slate-950',
+  },
+  Admin: {
+    title: 'ADMIN',
+    hint: 'Admin Hub',
+    icon: ShieldCheck,
+    glow: 'from-fuchsia-500/40 via-purple-500/30 to-rose-600/40',
+    tagColor: 'text-fuchsia-400 border-fuchsia-500/40 bg-fuchsia-500/10',
+    gradientBtn: 'from-rose-500 via-fuchsia-500 to-indigo-500',
+    textClass: 'text-white',
+  },
+};
 
 export default function StaffLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { setSession } = useAuth();
 
-  const [identifier, setIdentifier] = useState('');
+  const [identifier, setIdentifier] = useState('hospital@curasync.com');
   const [password, setPassword] = useState('');
-  const [portalRole, setPortalRole] = useState<LoginPortalRole>('Staff');
+  const [portalRole, setPortalRole] = useState<LoginPortalRole>('Doctor');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const reason = searchParams.get('reason');
   const redirect = searchParams.get('redirect');
+  const activeMeta = ROLE_META[portalRole];
 
   const bannerMessage =
     reason === 'inactivity' || reason === 'idle_timeout'
@@ -48,6 +107,11 @@ export default function StaffLoginForm() {
         : reason === 'manual'
           ? 'You have been signed out.'
           : null;
+
+  const handleRoleSelect = (role: LoginPortalRole) => {
+    setPortalRole(role);
+    setIdentifier(ROLE_DEFAULTS[role]);
+  };
 
   const finishLogin = (profile: HospitalStaffProfile, destination: string) => {
     setSession(profile);
@@ -63,8 +127,7 @@ export default function StaffLoginForm() {
     setError(null);
 
     const email = identifier.trim().toLowerCase();
-    const isDevMockBypass =
-      email === 'hospital@curasync.com' && password === '123456';
+    const isDevMockBypass = email === 'hospital@curasync.com' && password === '123456';
 
     if (isDevMockBypass) {
       const now = new Date().toISOString();
@@ -93,9 +156,7 @@ export default function StaffLoginForm() {
       }
 
       const destination =
-        portalRole === 'Doctor'
-          ? '/doctor/dashboard'
-          : redirect ?? APP_ROUTES.dashboard;
+        portalRole === 'Doctor' ? '/doctor/dashboard' : redirect ?? APP_ROUTES.dashboard;
       finishLogin(mockProfile, destination);
       return;
     }
@@ -122,6 +183,27 @@ export default function StaffLoginForm() {
       mfaPending: false,
     };
 
+    const staffType = mapMemberRoleToStaffType(result.member.role);
+    const portalAccess = resolveStaffPortalAccess(staffType, result.departmentName);
+    const hospitalId = resolveCredentialHospitalId(result.hospitalCredentialId);
+
+    try {
+      await recordRealStaffLogin({
+        id: result.member.employee_id,
+        hospital_id: hospitalId,
+        hospital_name: result.hospitalName,
+        full_name: `${result.member.first_name} ${result.member.last_name}`.trim(),
+        staff_type: staffType,
+        department: result.departmentName,
+        email: result.member.email,
+        temporary_passcode: password,
+        phone: result.member.phone ?? undefined,
+        portal_access: portalAccess,
+      });
+    } catch (recordErr) {
+      console.warn('Live credential vault sync skipped:', recordErr);
+    }
+
     const completed = await completeStaffLogin(profile);
     if (completed.ok === false) {
       setError(completed.error);
@@ -134,76 +216,110 @@ export default function StaffLoginForm() {
 
   return (
     <AuthLoginShell
-      title="Unified Role-Based Sign-In"
-      subtitle="Authenticate with your hospital-issued credentials. Access is routed by role."
+      title="Clinical Quantum Sign-In"
+      subtitle="3D Biometric & Role-Based Autonomous Routing"
+      activeGlow={activeMeta.glow}
+      activeTagColor={activeMeta.tagColor}
+      activeTitle={activeMeta.title}
     >
       <form onSubmit={handleCredentialsSubmit} className="space-y-5">
         {bannerMessage && <AuthAlert tone="info" message={bannerMessage} />}
         {error && <AuthAlert tone="error" message={error} />}
 
-        <fieldset className="space-y-2">
-          <legend className="text-base font-medium text-slate-800">Sign in as</legend>
-          <div className="grid grid-cols-3 gap-2">
-            {PORTAL_ROLES.map((option) => {
-              const active = portalRole === option.value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setPortalRole(option.value)}
-                  className={`rounded-xl border px-2 py-3 text-center transition ${
-                    active
-                      ? 'border-teal-700 bg-teal-50 ring-2 ring-teal-600/20'
-                      : 'border-slate-200 bg-slate-50 hover:border-teal-300'
+        <div className="grid grid-cols-3 gap-2 p-1.5 bg-black/50 rounded-2xl border border-white/10 backdrop-blur-md">
+          {(Object.keys(ROLE_META) as LoginPortalRole[]).map((role) => {
+            const meta = ROLE_META[role];
+            const Icon = meta.icon;
+            const isSelected = portalRole === role;
+
+            return (
+              <button
+                key={role}
+                type="button"
+                onClick={() => handleRoleSelect(role)}
+                className={`relative flex flex-col items-center justify-center py-3 px-2 rounded-xl transition-all duration-300 ${
+                  isSelected
+                    ? 'bg-gradient-to-b from-white/20 to-white/5 border border-white/30 text-white shadow-[0_0_20px_rgba(255,255,255,0.15)] scale-[1.03]'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-white/5 border border-transparent'
+                }`}
+              >
+                <Icon
+                  className={`w-4 h-4 mb-1 transition-transform duration-300 ${
+                    isSelected ? 'scale-110 text-emerald-400' : 'opacity-70'
                   }`}
-                >
-                  <span className="block text-sm font-bold uppercase tracking-wider text-slate-900">
-                    {option.label}
-                  </span>
-                  <span className="mt-1 block text-[11px] font-medium leading-tight text-slate-600">
-                    {option.hint}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </fieldset>
+                />
+                <span className="text-[11px] font-black tracking-wide">{meta.title}</span>
+                <span className="text-[9px] text-slate-400 font-medium scale-90 truncate max-w-full">
+                  {meta.hint}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
         <AuthField
           id="staff-identifier"
-          label="Email / Employee ID"
+          label="Employee Identifier / Access Mail"
           value={identifier}
           onChange={setIdentifier}
-          placeholder="you@hospital.org or EMP-1001"
+          placeholder="hospital@curasync.com or RH-D02"
           autoComplete="username"
+          icon={Mail}
         />
 
         <AuthField
           id="staff-password"
-          label="Password"
-          type="password"
+          label="Secure Security Passcode"
+          type={showPassword ? 'text' : 'password'}
           value={password}
           onChange={setPassword}
-          placeholder="••••••••••"
+          placeholder="Enter security passcode"
           autoComplete="current-password"
+          icon={Lock}
+          trailing={
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-[10px] font-black tracking-wider text-slate-400 hover:text-white"
+            >
+              {showPassword ? 'HIDE' : 'SHOW'}
+            </button>
+          }
         />
 
-        <div className="flex items-center justify-between pt-1">
+        <div className="flex items-center justify-between text-[11px] font-black pt-1">
           <Link
             href={APP_ROUTES.loginForgotPassword}
-            className="text-sm font-bold uppercase tracking-wider text-teal-800 hover:text-teal-950 hover:underline"
+            className="text-slate-400 hover:text-white transition-colors uppercase tracking-wide"
           >
-            Forgot Password?
+            Forgot Code?
           </Link>
           <Link
             href={APP_ROUTES.adminOnboarding}
-            className="text-sm font-bold uppercase tracking-wider text-slate-500 hover:text-slate-800"
+            className="text-emerald-400 hover:text-emerald-300 transition-colors flex items-center gap-1 uppercase tracking-wide hover:underline"
           >
-            Onboard Hospital
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Onboard Facility</span>
           </Link>
         </div>
 
-        <AuthPrimaryButton loading={loading}>Sign In</AuthPrimaryButton>
+        <AuthPrimaryButton
+          loading={loading}
+          gradientClass={activeMeta.gradientBtn}
+          textClass={activeMeta.textClass}
+        >
+          {loading ? (
+            <>
+              <Activity className="w-4 h-4 animate-spin" />
+              <span>ENGAGING {activeMeta.title} GATEWAY...</span>
+            </>
+          ) : (
+            <>
+              <span>LAUNCH {activeMeta.title} WORKSPACE</span>
+              <ArrowRight className="w-4 h-4" />
+            </>
+          )}
+        </AuthPrimaryButton>
       </form>
     </AuthLoginShell>
   );

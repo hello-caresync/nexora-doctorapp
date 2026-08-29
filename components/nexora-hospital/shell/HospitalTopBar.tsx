@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
-import { Bell, Menu, Search, UserCircle, X } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Bell, LogOut, Menu, Search, UserCircle, X } from 'lucide-react';
 
+import { clearAdminSession, getAdminSession } from '@/lib/admin/auth';
 import { hospitalHref } from '@/lib/nexora-hospital/navigation';
 import { useUnreadHospitalNotifications } from '@/lib/nexora-hospital/hooks';
 import { useHospitalStore } from '@/lib/nexora-hospital/store';
@@ -29,6 +30,17 @@ export function HospitalTopBar({ onMenuClick }: { onMenuClick?: () => void }) {
   const [search, setSearch] = useState('');
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifTab, setNotifTab] = useState<(typeof NOTIF_TABS)[number]>('All');
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
+
+  useEffect(() => {
+    const session = getAdminSession();
+    setAdminEmail(session?.email ?? null);
+  }, []);
+
+  const handleLogout = () => {
+    clearAdminSession();
+    router.replace('/login');
+  };
 
   const todayLabel = useMemo(
     () =>
@@ -72,8 +84,8 @@ export function HospitalTopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           <Menu className="h-5 w-5" />
         </button>
         <div className="hidden sm:block">
-          <p className="text-base font-extrabold text-[#0A2E36]">🏥 Nexora Hospital</p>
-          <p className="text-sm font-medium text-[#005F6B]">Operations Hub V0</p>
+          <p className="text-base font-extrabold text-[#0A2E36]">REGAL HOSPITAL</p>
+          <p className="text-sm font-medium text-[#005F6B]">Hospital Operations · RH-BLR-01</p>
         </div>
       </div>
 
@@ -162,10 +174,20 @@ export function HospitalTopBar({ onMenuClick }: { onMenuClick?: () => void }) {
           />
           <UserCircle className="h-5 w-5 text-[#007B8A]" />
           <div className="hidden sm:block">
-            <p className="text-sm font-bold text-[#0A2E36]">Admin User</p>
-            <p className="text-xs text-[#005F6B]">{settings.hospitalName.split(' ')[0] ?? 'Nexora'}</p>
+            <p className="text-sm font-bold text-[#0A2E36]">Hospital Administrator</p>
+            <p className="max-w-[140px] truncate text-xs text-[#005F6B]">{adminEmail ?? settings.hospitalName}</p>
           </div>
         </div>
+
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex items-center gap-1.5 rounded-xl border border-[#B2EBF2] px-3 py-2 text-sm font-semibold text-[#007B8A] transition-colors hover:bg-[#E0F7FA] hover:text-[#004D56]"
+          aria-label="Log out of Regal Hospital"
+        >
+          <LogOut className="h-4 w-4" aria-hidden="true" />
+          <span className="hidden sm:inline">Logout</span>
+        </button>
       </div>
     </header>
   );

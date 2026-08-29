@@ -17,6 +17,7 @@ export type MemberAuthSuccess = {
   member: HospitalMemberRecord;
   departmentName: string;
   hospitalName: string;
+  hospitalCredentialId: string;
   assignedApp: 'Doctor App' | 'Hospital App';
   staffSession: ReturnType<typeof buildStaffSession>;
   doctorSession?: DevDoctorSession;
@@ -55,6 +56,7 @@ async function fetchMemberRow(identifier: string): Promise<{
   member: HospitalMemberRecord;
   departmentName: string;
   hospitalName: string;
+  hospitalCredentialId: string;
   onboardingCompleted: boolean;
 } | null> {
   const trimmed = identifier.trim();
@@ -66,7 +68,7 @@ async function fetchMemberRow(identifier: string): Promise<{
       `
       *,
       departments ( name ),
-      hospitals ( hospital_name, onboarding_completed )
+      hospitals ( hospital_name, onboarding_completed, registration_number )
     `,
     );
 
@@ -79,13 +81,19 @@ async function fetchMemberRow(identifier: string): Promise<{
 
   const row = data as HospitalMemberRecord & {
     departments: { name: string } | null;
-    hospitals: { hospital_name: string; onboarding_completed: boolean } | null;
+    hospitals: {
+      hospital_name: string;
+      onboarding_completed: boolean;
+      registration_number: string | null;
+    } | null;
   };
 
   return {
     member: row,
     departmentName: row.departments?.name ?? 'General',
     hospitalName: row.hospitals?.hospital_name ?? 'Nexora Hospital',
+    hospitalCredentialId:
+      row.hospitals?.registration_number?.trim() || row.hospital_id,
     onboardingCompleted: row.hospitals?.onboarding_completed ?? false,
   };
 }
@@ -130,7 +138,8 @@ export async function authenticateHospitalMember(
     };
   }
 
-  const { member, departmentName, hospitalName, onboardingCompleted } = fetched;
+  const { member, departmentName, hospitalName, hospitalCredentialId, onboardingCompleted } =
+    fetched;
 
   if (!onboardingCompleted) {
     return {
@@ -210,6 +219,7 @@ export async function authenticateHospitalMember(
     member,
     departmentName,
     hospitalName,
+    hospitalCredentialId,
     assignedApp: assignedAppForRole(member.role),
     staffSession,
     doctorSession,

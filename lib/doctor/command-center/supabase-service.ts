@@ -672,7 +672,11 @@ export interface ConsultationFinalizeResult {
 export interface PatientPrescriptionRecord {
   id: string;
   created_at: string;
+  diagnosis?: string;
+  doctor_name?: string;
+  patient_name?: string;
   special_instructions?: string;
+  instructions?: string;
   medications: ConsultationMedicationItem[] | string;
   patient_id: string;
   consultation_id?: string;

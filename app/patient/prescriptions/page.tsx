@@ -1,327 +1,326 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { createClient } from '@/lib/supabase/client';
-import type { RealtimePostgresChangesPayload } from '@supabase/supabase-js';
-import {
-  parsePrescriptionMedications,
-  type ConsultationMedicationItem,
-  type PatientPrescriptionRecord,
-} from '@/lib/doctor/command-center/supabase-service';
-import { BULLET, ELLIPSIS, EM_DASH } from '@/lib/utils/typography';
+import React, { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabaseClient';
+import { getActivePatientId, getActivePatientName } from '@/lib/patient/active-patient-node';
+import { Pill, Stethoscope, Building2, CalendarClock, Printer } from 'lucide-react';
 
-const DEFAULT_PATIENT_ID = 'b0000000-0000-0000-0000-000000000002';
+interface PrescriptionMedication {
+  name: string;
+  dosage?: string;
+  frequency?: string;
+  timing?: string;
+  duration?: string;
+}
+
+interface PrescriptionRecord {
+  id: string;
+  appointment_id?: string;
+  patient_id?: string;
+  patient_name?: string;
+  doctor_name?: string;
+  doctor_code?: string;
+  doctor_id?: string;
+  department?: string;
+  hospital_name?: string;
+  diagnosis?: string;
+  medicines?: PrescriptionMedication[];
+  medications?: PrescriptionMedication[];
+  instructions?: string;
+  follow_up_date?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+function parseMedicinesField(raw: unknown): PrescriptionMedication[] {
+  if (!raw) return [];
+
+  let parsed: unknown = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed.map((med) => {
+    const item = med as Record<string, unknown>;
+    return {
+      name: String(item.name || item.medicine || '').trim(),
+      dosage: item.dosage ? String(item.dosage) : undefined,
+      frequency: item.frequency ? String(item.frequency) : undefined,
+      timing: item.timing ? String(item.timing) : undefined,
+      duration: item.duration ? String(item.duration) : undefined,
+    };
+  });
+}
+
+function normalizePrescriptionRow(raw: Record<string, unknown>): PrescriptionRecord {
+  const medicines = parseMedicinesField(raw.medicines);
+  const medications = parseMedicinesField(raw.medications);
+
+  return {
+    id: String(raw.id ?? ''),
+    appointment_id: raw.appointment_id ? String(raw.appointment_id) : undefined,
+    patient_id: raw.patient_id ? String(raw.patient_id) : undefined,
+    patient_name: raw.patient_name ? String(raw.patient_name) : undefined,
+    doctor_name: raw.doctor_name ? String(raw.doctor_name) : undefined,
+    doctor_code: raw.doctor_code ? String(raw.doctor_code) : undefined,
+    doctor_id: raw.doctor_id ? String(raw.doctor_id) : undefined,
+    department: raw.department ? String(raw.department) : undefined,
+    hospital_name: raw.hospital_name ? String(raw.hospital_name) : undefined,
+    diagnosis: raw.diagnosis ? String(raw.diagnosis) : undefined,
+    instructions: raw.instructions ? String(raw.instructions) : undefined,
+    follow_up_date: raw.follow_up_date ? String(raw.follow_up_date) : undefined,
+    status: raw.status ? String(raw.status) : undefined,
+    created_at: raw.created_at ? String(raw.created_at) : undefined,
+    updated_at: raw.updated_at ? String(raw.updated_at) : undefined,
+    medicines: medicines.length > 0 ? medicines : medications,
+    medications: medications.length > 0 ? medications : medicines,
+  };
+}
+
+function getMedicineList(rx: PrescriptionRecord): PrescriptionMedication[] {
+  const fromMedicines = parseMedicinesField(rx.medicines);
+  if (fromMedicines.length > 0) return fromMedicines;
+  return parseMedicinesField(rx.medications);
+}
 
 export default function PatientPrescriptionsPage() {
-  const [prescriptions, setPrescriptions] = useState<PatientPrescriptionRecord[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [patientId, setPatientId] = useState<string>(DEFAULT_PATIENT_ID);
+  const [prescriptions, setPrescriptions] = useState<PrescriptionRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentPatientId, setCurrentPatientId] = useState('');
+  const [patientName, setPatientName] = useState('');
 
   const fetchPrescriptions = useCallback(async () => {
-    try {
-      const supabase = createClient();
+    const activeId = getActivePatientId();
+    setCurrentPatientId(activeId);
+    setPatientName(getActivePatientName());
 
-      const { data: authUser } = await supabase.auth.getUser();
-      const activePatientId = authUser?.user?.id || DEFAULT_PATIENT_ID;
-      setPatientId(activePatientId);
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('prescriptions')
+      .select('*')
+      .eq('patient_id', activeId)
+      .order('created_at', { ascending: false });
 
-      const { data, error } = await supabase
-        .from('prescriptions')
-        .select(`
-          id,
-          created_at,
-          patient_id,
-          consultation_id,
-          special_instructions,
-          medications,
-          consultations (
-            diagnosis,
-            chief_complaint,
-            clinical_notes,
-            follow_up_date,
-            doctors (
-              full_name,
-              department,
-              specialization
-            ),
-            vitals (
-              temperature_f,
-              bp_systolic,
-              bp_diastolic,
-              pulse_bpm,
-              spo2_percent,
-              weight_kg
-            )
-          )
-        `)
-        .eq('patient_id', activePatientId)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error('Error fetching patient prescriptions:', error.message);
-      } else if (data) {
-        setPrescriptions(data as unknown as PatientPrescriptionRecord[]);
-      }
-    } catch (err) {
-      console.error('Unexpected error loading prescriptions:', err);
-    } finally {
-      setLoading(false);
+    if (error) {
+      console.error('Error loading prescriptions:', error);
+      setPrescriptions([]);
+    } else if (data) {
+      setPrescriptions(
+        data.map((row: Record<string, unknown>) => normalizePrescriptionRow(row)),
+      );
+    } else {
+      setPrescriptions([]);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
+    const activeId = getActivePatientId();
+    setCurrentPatientId(activeId);
+    setPatientName(getActivePatientName());
     void fetchPrescriptions();
 
-    const supabase = createClient();
-
-    const setupRealtime = async () => {
-      const { data: authUser } = await supabase.auth.getUser();
-      const activePatientId = authUser?.user?.id || DEFAULT_PATIENT_ID;
-      setPatientId(activePatientId);
-
-      const channel = supabase
-        .channel(`patient-prescriptions-${activePatientId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'prescriptions',
-            filter: `patient_id=eq.${activePatientId}`,
-          },
-          (payload: RealtimePostgresChangesPayload<{ patient_id?: string }>) => {
-            console.log(`New prescription issued ${EM_DASH} updating patient view:`, payload.new);
-            void fetchPrescriptions();
-          },
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'prescriptions',
-            filter: `patient_id=eq.${activePatientId}`,
-          },
-          () => {
-            void fetchPrescriptions();
-          },
-        )
-        .subscribe();
-
-      return channel;
-    };
-
-    let channelPromise = setupRealtime();
+    const rxChannel = supabase
+      .channel(`rx_node_${activeId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'prescriptions',
+          filter: `patient_id=eq.${activeId}`,
+        },
+        (payload: { new: Record<string, unknown> }) => {
+          const newRecord = normalizePrescriptionRow(payload.new);
+          if (newRecord?.id) {
+            setPrescriptions((prev) => [
+              newRecord,
+              ...prev.filter((p) => p.id !== newRecord.id),
+            ]);
+          }
+        },
+      )
+      .subscribe();
 
     return () => {
-      void channelPromise.then((channel) => {
-        if (channel) supabase.removeChannel(channel);
-      });
+      supabase.removeChannel(rxChannel);
     };
   }, [fetchPrescriptions]);
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   return (
-    <div className="min-h-screen bg-slate-50 p-6 max-w-5xl mx-auto space-y-6 font-sans print:p-0 print:bg-white">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-6 rounded-xl border border-slate-200 shadow-sm gap-4 print:hidden">
-        <div>
-          <span className="text-xs font-semibold tracking-wider text-emerald-600 uppercase">
-            CuraSync Digital Health Records
-          </span>
-          <h1 className="text-2xl font-bold text-slate-900 mt-1">My Digital Prescriptions</h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Real-time Rx delivery {BULLET} Patient ID:{' '}
-            <span className="font-semibold text-slate-800">{patientId.slice(0, 8)}{ELLIPSIS}</span>
-          </p>
+    <div className="max-w-4xl mx-auto p-6 space-y-4 print:p-0 print:max-w-none">
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .rx-print-root,
+          .rx-print-root * {
+            visibility: visible;
+          }
+          .rx-print-root {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .rx-card {
+            break-inside: avoid;
+            box-shadow: none !important;
+            border: 1px solid #cbd5e1 !important;
+          }
+        }
+      `}</style>
+
+      <div className="rx-print-root space-y-4">
+        <div className="flex items-center justify-between border-b pb-4 no-print">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900">My Digital Prescriptions</h1>
+            <p className="text-xs text-slate-500">
+              Node: {currentPatientId || '—'}
+              {patientName ? ` • ${patientName}` : ''}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              Print
+            </button>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-full flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              Live Sync
+            </span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-4 py-2 text-sm font-medium text-slate-700 bg-white hover:bg-slate-100 rounded-lg transition-colors border border-slate-300 shadow-sm flex items-center gap-2"
-          >
-            🖨️ Print / Save PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => fetchPrescriptions()}
-            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors shadow-sm"
-          >
-            Refresh
-          </button>
-        </div>
-      </div>
+        {loading ? (
+          <div className="text-center py-12 text-xs text-slate-400">Loading prescriptions...</div>
+        ) : prescriptions.length === 0 ? (
+          <div className="text-center py-16 bg-white border border-slate-200 rounded-2xl text-slate-500 text-sm shadow-xs">
+            <Pill className="w-8 h-8 mx-auto mb-3 text-slate-300" />
+            <p className="font-semibold text-slate-700">No Prescriptions Issued Yet</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+              When your doctor completes a consultation, your prescription will appear here instantly
+              for patient node {currentPatientId || '—'}.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4">
+            {prescriptions.map((rx) => {
+              const medicineList = getMedicineList(rx);
 
-      {loading ? (
-        <div className="bg-white p-12 rounded-xl border border-slate-200 text-center">
-          <p className="text-slate-500 font-medium">Loading your medical records...</p>
-        </div>
-      ) : prescriptions.length === 0 ? (
-        <div className="bg-white p-12 rounded-xl border border-slate-200 text-center space-y-2">
-          <p className="text-lg font-semibold text-slate-800">No Digital Prescriptions Yet</p>
-          <p className="text-sm text-slate-500">
-            Once your doctor finalizes a consultation, your digital prescription and vitals will
-            appear here in real time.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-6">
-          {prescriptions.map((rx) => {
-            const doc = rx.consultations?.doctors;
-            const vitals = rx.consultations?.vitals?.[0];
-            const meds: ConsultationMedicationItem[] = parsePrescriptionMedications(rx.medications);
-            const rxDate = new Date(rx.created_at).toLocaleDateString('en-IN', {
-              day: 'numeric',
-              month: 'short',
-              year: 'numeric',
-            });
-
-            return (
-              <div
-                key={rx.id}
-                className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden print:border-none print:shadow-none"
-              >
-                <div className="p-6 bg-slate-900 text-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 print:bg-white print:text-black print:border-b print:border-slate-300">
-                  <div>
-                    <h2 className="text-xl font-bold">
-                      {doc?.full_name || 'Dr. CHANDRAKANTH S KESARI'}
-                    </h2>
-                    <p className="text-xs text-slate-300 mt-0.5 print:text-slate-600">
-                      {doc?.department || 'General Surgery'} {BULLET}{' '}
-                      {doc?.specialization || 'General Surgeon'}
-                    </p>
-                  </div>
-
-                  <div className="sm:text-right">
-                    <span className="text-xs px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-md font-medium inline-block print:border-slate-400 print:text-slate-800">
-                      Verified Rx
-                    </span>
-                    <p className="text-xs text-slate-300 mt-1.5 print:text-slate-600">
-                      Date:{' '}
-                      <span className="font-medium text-white print:text-slate-900">{rxDate}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-6 space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-emerald-50/50 border border-emerald-100 rounded-lg">
-                    <div>
-                      <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
-                        Primary Diagnosis
-                      </span>
-                      <p className="text-base font-bold text-slate-900 mt-0.5">
-                        {rx.consultations?.diagnosis || 'General Clinical Review'}
-                      </p>
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
-                        Chief Complaint
-                      </span>
-                      <p className="text-sm font-medium text-slate-700 mt-0.5">
-                        {rx.consultations?.chief_complaint || 'N/A'}
-                      </p>
-                    </div>
-                  </div>
-
-                  {vitals && (
-                    <div>
-                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                        Recorded Vitals
-                      </h3>
-                      <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
-                        {[
-                          { label: 'Temp', value: `${vitals.temperature_f ?? '98.6'} °F` },
-                          {
-                            label: 'Blood Pressure',
-                            value: `${vitals.bp_systolic ?? '120'}/${vitals.bp_diastolic ?? '80'}`,
-                          },
-                          { label: 'Pulse', value: `${vitals.pulse_bpm ?? '72'} bpm` },
-                          { label: 'SpO2', value: `${vitals.spo2_percent ?? '98'}%` },
-                          { label: 'Weight', value: `${vitals.weight_kg ?? '68'} kg` },
-                          {
-                            label: 'Follow-up',
-                            value: rx.consultations?.follow_up_date || 'As Needed',
-                          },
-                        ].map(({ label, value }) => (
-                          <div
-                            key={label}
-                            className="p-2.5 bg-slate-50 border border-slate-200 rounded-md text-center"
-                          >
-                            <span className="text-[10px] text-slate-500 uppercase block font-semibold">
-                              {label}
-                            </span>
-                            <span className="text-sm font-bold text-slate-800">{value}</span>
-                          </div>
-                        ))}
+              return (
+                <article
+                  key={rx.id}
+                  className="rx-card bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3"
+                >
+                  <header className="flex items-start justify-between border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center">
+                        <Stethoscope className="w-5 h-5 text-teal-700" />
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-slate-900 text-sm">
+                          {rx.doctor_name || '—'}
+                        </h3>
+                        <p className="text-[10px] text-slate-500 font-mono">
+                          {(rx.doctor_code || rx.doctor_id) && `${rx.doctor_code || rx.doctor_id} • `}
+                          {rx.department || '—'}
+                        </p>
+                        {rx.diagnosis && (
+                          <p className="text-xs text-teal-700 font-medium mt-0.5">
+                            Diagnosis: {rx.diagnosis}
+                          </p>
+                        )}
+                        {rx.status && (
+                          <p className="text-[10px] font-bold uppercase text-slate-500 mt-0.5">
+                            Status: {rx.status}
+                          </p>
+                        )}
                       </div>
                     </div>
-                  )}
+                    <time className="text-[10px] font-mono text-slate-400">
+                      {rx.created_at ? new Date(rx.created_at).toLocaleString() : '—'}
+                    </time>
+                  </header>
 
-                  <div>
-                    <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
-                      Prescribed Medications
-                    </h3>
-                    <div className="overflow-x-auto border border-slate-200 rounded-lg">
-                      <table className="w-full text-left text-sm border-collapse">
-                        <thead>
-                          <tr className="bg-slate-100 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase">
-                            <th className="p-3">#</th>
-                            <th className="p-3">Medication Name</th>
-                            <th className="p-3">Dosage</th>
-                            <th className="p-3">Frequency</th>
-                            <th className="p-3">Duration</th>
-                            <th className="p-3">Instructions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                          {meds.length > 0 ? (
-                            meds.map((med, idx) => (
-                              <tr key={`${rx.id}-${idx}`} className="hover:bg-slate-50/50">
-                                <td className="p-3 text-slate-400 font-medium">{idx + 1}</td>
-                                <td className="p-3 font-semibold text-slate-900">{med.name}</td>
-                                <td className="p-3 text-slate-700">{med.dosage}</td>
-                                <td className="p-3 font-mono font-medium text-emerald-700">
-                                  {med.frequency}
-                                </td>
-                                <td className="p-3 text-slate-700">{med.duration}</td>
-                                <td className="p-3 text-slate-600 italic">
-                                  {med.instructions || 'After meals'}
-                                </td>
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td colSpan={6} className="p-4 text-center text-slate-500 text-xs">
-                                No specific medications recorded for this encounter.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  {rx.special_instructions && (
-                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                      <span className="text-xs font-semibold text-slate-500 uppercase block mb-1">
-                        Doctor Instructions
-                      </span>
-                      <p className="text-sm text-slate-800 leading-relaxed">
-                        {rx.special_instructions}
-                      </p>
+                  {(rx.hospital_name || rx.follow_up_date) && (
+                    <div className="flex flex-wrap gap-2 text-[10px]">
+                      {rx.hospital_name && (
+                        <span className="inline-flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-600 font-semibold">
+                          <Building2 className="w-3 h-3" />
+                          {rx.hospital_name}
+                        </span>
+                      )}
+                      {rx.follow_up_date && (
+                        <span className="inline-flex items-center gap-1 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 text-amber-800 font-semibold">
+                          <CalendarClock className="w-3 h-3" />
+                          Follow-up: {rx.follow_up_date}
+                        </span>
+                      )}
                     </div>
                   )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+
+                  <section className="space-y-2">
+                    <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
+                      <Pill className="w-3.5 h-3.5 text-teal-600" />
+                      Prescribed Medicines
+                    </h4>
+                    <div className="grid gap-2">
+                      {medicineList.length === 0 ? (
+                        <div className="text-xs text-slate-400 italic py-2">—</div>
+                      ) : (
+                        medicineList.map((med, idx) => (
+                          <div
+                            key={`${rx.id}-med-${idx}`}
+                            className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-center justify-between text-xs"
+                          >
+                            <span className="font-bold text-slate-900">{med.name}</span>
+                            <div className="flex items-center gap-2 flex-wrap justify-end">
+                              {(med.dosage || med.frequency) && (
+                                <span className="bg-teal-100 text-teal-800 px-2 py-0.5 rounded font-mono font-bold text-[10px]">
+                                  {med.dosage || med.frequency}
+                                </span>
+                              )}
+                              {med.timing && (
+                                <span className="text-slate-500 text-[10px]">{med.timing}</span>
+                              )}
+                              {med.duration && (
+                                <span className="text-slate-600">{med.duration}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
+
+                  {rx.instructions && (
+                    <footer className="bg-amber-50/60 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-900">
+                      <span className="font-bold">Advice: </span>
+                      {rx.instructions}
+                    </footer>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -39,7 +39,7 @@ export const HOSPITAL_NAV: HospitalNavItem[] = [
     id: 'dashboard',
     label: 'Dashboard',
     emoji: '🏠',
-    href: '/hospital/dashboard',
+    href: '/dashboard',
     icon: LayoutDashboard,
     description: 'Operational command center',
   },
@@ -121,7 +121,8 @@ const ENTERPRISE_PREFIXES = HOSPITAL_NAV.map((n) => n.href);
 
 /** Legacy /dashboard/* routes still supported for bookmarks */
 const LEGACY_DASHBOARD_MAP: Record<string, string> = {
-  '/dashboard': '/hospital/dashboard',
+  '/dashboard': '/dashboard',
+  '/hospital/dashboard': '/dashboard',
   '/dashboard/patients': '/hospital/patients',
   '/dashboard/appointments': '/hospital/appointments',
   '/dashboard/opd': '/hospital/opd-queue',
@@ -163,5 +164,5 @@ export function hospitalModuleFromPath(pathname: string | null): HospitalModuleI
 }
 
 export function hospitalHref(moduleId: HospitalModuleId): string {
-  return HOSPITAL_NAV.find((n) => n.id === moduleId)?.href ?? '/hospital/dashboard';
+  return HOSPITAL_NAV.find((n) => n.id === moduleId)?.href ?? '/dashboard';
 }

@@ -18,11 +18,15 @@ import {
   isSessionExpired,
   logUserActivity,
   refreshSessionActivity,
-  resolvePostLoginRoute,
   signOut,
   touchSessionActivity,
   type HospitalStaffProfile,
 } from '../lib/auth';
+import {
+  CURASYNC_ACTIVE_SESSION_KEY,
+  parseActiveSession,
+  resolvePostLoginRoute,
+} from '@/lib/auth/active-session';
 
 type AuthContextValue = {
   session: HospitalStaffProfile | null;
@@ -215,13 +219,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (isLoading) return;
 
-    if (isProtectedPath(pathname) && !session) {
+    const activeSession = parseActiveSession(
+      typeof window !== 'undefined' ? localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY) : null,
+    );
+
+    if (isProtectedPath(pathname) && !session && !activeSession) {
       router.replace(`${APP_ROUTES.login}?redirect=${encodeURIComponent(pathname)}`);
       return;
     }
 
-    if (isPublicAuthPath(pathname) && session && pathname === APP_ROUTES.login) {
-      router.replace(resolvePostLoginRoute(session.role));
+    if (isPublicAuthPath(pathname) && pathname === APP_ROUTES.login) {
+      if (activeSession) {
+        router.replace(
+          resolvePostLoginRoute(activeSession.staff_type, activeSession.portal_access),
+        );
+      }
+      return;
     }
   }, [isLoading, pathname, router, session]);
 

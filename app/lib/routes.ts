@@ -46,7 +46,7 @@ export const APP_ROUTES = {
   masterDataPharmacy: '/master-data/pharmacy',
 
   /** Hospital command cockpit */
-  hospitalDashboard: '/hospital/dashboard',
+  hospitalDashboard: '/dashboard',
 
   /** First-time hospital admin onboarding wizard */
   adminOnboarding: '/admin/onboarding',

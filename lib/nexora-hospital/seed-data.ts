@@ -265,10 +265,10 @@ export const SEED_NOTIFICATIONS: HospitalNotification[] = [
 ];
 
 export const DEFAULT_SETTINGS: HospitalSettings = {
-  hospitalName: 'Nexora Multispeciality Hospital',
+  hospitalName: 'Regal Hospital',
   address: '42 Healthcare Avenue, Bengaluru 560001',
   phone: '+91 80 4000 0000',
-  email: 'admin@nexora.com',
+  email: 'admin@regalhospital.com',
   departments: ['General Medicine', 'Cardiology', 'Orthopedics', 'Pediatrics', 'Emergency'],
   workingHoursStart: '08:00',
   workingHoursEnd: '20:00',

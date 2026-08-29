@@ -37,8 +37,8 @@ export function DashboardWorkspace() {
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
         <div>
-          <h1 className="text-2xl font-black text-[#004D56]">Hospital Executive Workspace</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Real-time synchronized hospital operations control center.</p>
+          <h1 className="text-2xl font-black text-[#004D56]">Regal Hospital Dashboard</h1>
+          <p className="text-xs text-slate-500 mt-0.5">Real-time synchronized hospital operations command center.</p>
         </div>
       </div>
 

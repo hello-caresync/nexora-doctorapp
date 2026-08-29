@@ -1,1646 +1,879 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 import {
-  Users,
   Clock,
-  CheckCircle2,
-  AlertTriangle,
-  Stethoscope,
-  UserCheck,
-  Play,
-  RotateCw,
-  Calendar,
-  Activity,
-  HeartPulse,
-  FileText,
-  Loader2,
   Plus,
-  CalendarClock,
-  Building2,
-  Banknote,
-  ChevronDown,
+  RefreshCw,
+  Search,
+  Stethoscope,
+  Trash2,
+  User,
+  CheckCircle2,
   Siren,
-  X,
+  Pill,
+  FileText,
+  LogOut,
+  AlertCircle,
 } from 'lucide-react';
-import { toast } from 'sonner';
 
-import { createClient } from '@/lib/supabase/client';
-import { formatINR } from '@/lib/utils/currency';
-import {
-  attendEmergencyCase,
-  completeEmergencyCase,
-  loadAssignedEmergencyCases,
-  loadEmergencyClinicalArchive,
-  type EmergencyClinicalCase,
-} from '@/lib/hospital/operations/emergency-clinical-sync';
-import {
-  admitAppointmentToQueue,
-  bypassToNextWaiting,
-  callNextPatientInQueue,
-  createWalkInAppointment,
-  getNextUpcomingBooking,
-  getUpcomingBookings,
-  isInConsultationStatus,
-  isWaitingStatus,
-  type LiveAppointmentRecord,
-} from '@/lib/doctor/appointments-realtime';
+interface ActiveDoctorSession {
+  doctorId: string;
+  doctorName: string;
+  department: string;
+  specialization?: string;
+  email: string;
+  portalRoute?: string;
+}
 
-const REGAL_HOSPITAL = 'Regal Hospital';
-
-const CLINICIAN_DOCTOR_IDS: Record<string, string> = {
-  chandrakanth: 'RH-D02',
-  suriraju: 'RH-D01',
-  vikram: 'RH-D04',
-  rajesh: 'RH-D06',
+type QueueAppointment = {
+  id: string;
+  patient_id?: string | null;
+  patient_name?: string;
+  name?: string;
+  age?: number | string;
+  gender?: string;
+  chief_complaint?: string;
+  reason_for_visit?: string;
+  status?: string;
+  queue_status?: string;
+  token_number?: string | number;
+  appointment_time?: string;
+  time_slot?: string;
+  vitals_summary?: string;
+  doctor_id?: string;
+  doctor_code?: string;
+  doctor_name?: string;
+  created_at?: string;
+  _source_table?: string;
 };
 
-const CLINICIAN_OPTIONS = [
-  { id: 'ALL', label: 'All Hospital Appointments', keywords: [] as string[] },
-  {
-    id: 'chandrakanth',
-    label: 'Dr. Chandrakanth S. Kesari — General Surgery',
-    keywords: ['chandrakanth'],
-  },
-  { id: 'suriraju', label: 'Dr. Suriraju V — Urology', keywords: ['suriraju'] },
-  { id: 'vikram', label: 'Dr. Vikramaditya Rao — Cardiology', keywords: ['vikram'] },
-  { id: 'rajesh', label: 'Dr. Rajesh Kumar Hegde — Orthopedics', keywords: ['rajesh', 'hegde'] },
-];
-
-function getClinicianIlikePattern(clinicianId: string): string | null {
-  if (clinicianId === 'ALL') return null;
-  const option = CLINICIAN_OPTIONS.find((entry) => entry.id === clinicianId);
-  if (!option?.keywords.length) return null;
-  return option.keywords[0];
-}
-
-function appointmentMatchesClinician(
-  appt: LiveAppointmentRecord,
-  clinicianId: string,
-): boolean {
-  if (clinicianId === 'ALL') return true;
-  const option = CLINICIAN_OPTIONS.find((entry) => entry.id === clinicianId);
-  if (!option || option.keywords.length === 0) return true;
-
-  const haystack = `${appt.doctor_name ?? ''} ${appt.type ?? ''} ${appt.doctor_id ?? ''}`.toLowerCase();
-  return option.keywords.every((keyword) => haystack.includes(keyword.toLowerCase()));
-}
-
-function formatFeeLabel(fee?: string): string {
-  if (!fee) return '—';
-  const numeric = Number(String(fee).replace(/[^\d.]/g, ''));
-  if (Number.isNaN(numeric)) return fee;
-  return formatINR(numeric);
-}
-
-function formatAppointmentDateLabel(date?: string): string {
-  if (!date) {
-    return new Intl.DateTimeFormat('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(new Date());
-  }
-  const parsed = new Date(date);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return new Intl.DateTimeFormat('en-IN', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(parsed);
-}
-
-function queueStatusBadgeClass(status: string): string {
-  const normalized = status.toUpperCase();
-  if (normalized === 'IN_CONSULTATION' || normalized === 'IN_PROGRESS') {
-    return 'bg-[#227B6B] text-white border-[#1A6357]';
-  }
-  if (normalized === 'COMPLETED') {
-    return 'bg-[#EAF5F2] text-[#113831] border-[#A6E2D8]';
-  }
-  return 'bg-[#FFF7E6] text-[#8A5A00] border-[#F5D78E]';
-}
-
-function formatTokenLabel(token?: string, fallbackIndex?: number): string {
-  if (token) return token.startsWith('T-') ? token : `T-${String(token).padStart(2, '0')}`;
-  return `T-${String((fallbackIndex ?? 0) + 1).padStart(2, '0')}`;
-}
-
-const getRegisteredPatientName = (patient: unknown): string => {
-  if (!patient || typeof patient !== 'object') return 'Registered Patient';
-
-  const p = patient as Record<string, unknown>;
-  const nestedPatient = p.patient as Record<string, unknown> | undefined;
-  const nestedPatients = p.patients as Record<string, unknown> | undefined;
-  const nestedProfiles = p.profiles as Record<string, unknown> | undefined;
-  const userMetadata = p.user_metadata as Record<string, unknown> | undefined;
-
-  return (
-    String(p.patient_name ?? '').trim() ||
-    String(p.full_name ?? '').trim() ||
-    String(p.name ?? '').trim() ||
-    String(nestedPatient?.full_name ?? '').trim() ||
-    String(nestedPatient?.name ?? '').trim() ||
-    String(nestedPatients?.full_name ?? '').trim() ||
-    String(nestedProfiles?.full_name ?? '').trim() ||
-    String(nestedProfiles?.name ?? '').trim() ||
-    String(userMetadata?.full_name ?? '').trim() ||
-    'Registered Patient'
-  );
+type MedicationRow = {
+  name: string;
+  dosage: string;
+  timing: string;
+  duration: string;
 };
 
-async function enrichAppointmentsWithProfiles(
-  rows: Record<string, unknown>[],
-): Promise<LiveAppointmentRecord[]> {
-  const supabase = createClient();
-  const patientIds = Array.from(
-    new Set(rows.map((row) => String(row.patient_id ?? '')).filter(Boolean)),
-  );
+type HistoryItem = {
+  type: string;
+  created_at: string;
+  diagnosis?: string;
+  clinical_notes?: string;
+  medications?: MedicationRow[];
+};
 
-  const profileMap = new Map<string, Record<string, unknown>>();
-  if (patientIds.length > 0) {
-    const { data: profiles } = await supabase
-      .from('patient_profiles')
-      .select('id, full_name, gender, date_of_birth, dob')
-      .in('id', patientIds);
+type EmergencyRecord = {
+  patient_name: string;
+  bed_number?: string;
+  chief_complaint?: string;
+  reason_for_visit?: string;
+  admitted_at: string;
+  status?: string;
+};
 
-    for (const profile of (profiles ?? []) as Record<string, unknown>[]) {
-      if (profile.id) profileMap.set(String(profile.id), profile);
-    }
-  }
-
-  return rows.map((row, index) => {
-    const profile = profileMap.get(String(row.patient_id ?? ''));
-    const merged = {
-      ...row,
-      profiles: profile,
-      patients: profile,
-      patient: profile,
-      full_name: profile?.full_name ?? row.full_name,
-    };
-
-    const normalized = normalizeAppointmentRow(merged, index);
-    normalized.patient_name = getRegisteredPatientName(merged);
-
-    if (profile?.gender) {
-      normalized.gender = String(profile.gender);
-    }
-
-    const dob = (profile?.date_of_birth ?? profile?.dob) as string | undefined;
-    if (dob) {
-      const born = new Date(dob);
-      if (!Number.isNaN(born.getTime())) {
-        normalized.age = Math.floor(
-          (Date.now() - born.getTime()) / (365.25 * 24 * 3600 * 1000),
-        );
-      }
-    }
-
-    return normalized;
-  });
+function formatToken(token?: string | number | null): string {
+  if (token === undefined || token === null || String(token).trim() === '') return '—';
+  return `#${String(token).replace(/^#/, '')}`;
 }
 
-function normalizeAppointmentRow(
-  row: Record<string, unknown>,
-  index: number,
-): LiveAppointmentRecord {
-  return {
-    id: String(row.appointment_id ?? row.id ?? ''),
-    doctor_id: String(row.doctor_id ?? ''),
-    patient_id: row.patient_id ? String(row.patient_id) : undefined,
-    patient_name: getRegisteredPatientName(row),
-    age: row.age ? Number(row.age) : undefined,
-    gender: row.gender ? String(row.gender) : undefined,
-    doctor_name: row.doctor_name ? String(row.doctor_name) : undefined,
-    chief_complaint: String(
-      row.reason_for_visit ?? row.chief_complaint ?? row.reason ?? 'OPD Review',
-    ),
-    symptoms: String(row.symptoms ?? row.reason ?? row.chief_complaint ?? ''),
-    vitals_summary: row.vitals_summary ? String(row.vitals_summary) : undefined,
-    token_number: row.token_number != null ? String(row.token_number) : undefined,
-    appointment_date: row.appointment_date
-      ? String(row.appointment_date).slice(0, 10)
-      : undefined,
-    time_slot: String(row.appointment_time ?? row.time_slot ?? row.slot_time ?? 'Today'),
-    type: String(row.department ?? row.type ?? 'Standard Consultation'),
-    fee: row.fee ? String(row.fee) : undefined,
-    hospital_name: REGAL_HOSPITAL,
-    status: String(row.status ?? row.queue_status ?? 'WAITING').toUpperCase(),
-    predicted_wait_min: Number(
-      row.predicted_wait_min ?? row.estimated_wait_minutes ?? 5 + index * 3,
-    ),
-    ml_duration_min: Number(row.ml_duration_min ?? row.estimated_duration ?? 15),
-    created_at: row.created_at ? String(row.created_at) : undefined,
-  };
-}
-
-async function tryMarkInConsultation(appointmentId: string): Promise<void> {
-  const supabase = createClient();
-
-  try {
-    const patientUpdate = await supabase
-      .from('patient_appointments')
-      .update({ queue_status: 'IN_CONSULTATION', status: 'IN_CONSULTATION' })
-      .eq('id', appointmentId);
-
-    if (patientUpdate.error) {
-      console.warn(
-        'Non-fatal patient_appointments status update warning:',
-        patientUpdate.error.message,
-      );
-    }
-
-    const appointmentUpdate = await supabase
-      .from('appointments')
-      .update({ status: 'IN_CONSULTATION' })
-      .eq('id', appointmentId);
-
-    if (appointmentUpdate.error) {
-      const byAppointmentId = await supabase
-        .from('appointments')
-        .update({ status: 'IN_CONSULTATION' })
-        .eq('appointment_id', appointmentId);
-
-      if (byAppointmentId.error) {
-        console.warn('Non-fatal appointments status update warning:', byAppointmentId.error.message);
-      }
-    }
-  } catch (dbErr) {
-    console.warn('Non-fatal status update warning:', dbErr);
-  }
-}
-
-export default function DoctorDashboardPage() {
+export default function DoctorWorkstation() {
   const router = useRouter();
 
-  const doctorName = 'Dr. Chandrakanth S Kesari';
-  const department = 'General Surgery • Room 204';
-  const currentDate = new Intl.DateTimeFormat('en-IN', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date());
-
-  const [appointments, setAppointments] = useState<LiveAppointmentRecord[]>([]);
-  const [activePatient, setActivePatient] = useState<LiveAppointmentRecord | null>(null);
-  const [activeTab, setActiveTab] = useState<'queue' | 'appointments' | 'completed'>('queue');
+  const [session, setSession] = useState<ActiveDoctorSession | null>(null);
+  const [appointments, setAppointments] = useState<QueueAppointment[]>([]);
+  const [activePatient, setActivePatient] = useState<QueueAppointment | null>(null);
+  const [queueTab, setQueueTab] = useState<'waiting' | 'done'>('waiting');
+  const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [callingNext, setCallingNext] = useState(false);
-  const [bypassing, setBypassing] = useState(false);
-  const [admittingId, setAdmittingId] = useState<string | null>(null);
-  const [walkInLoading, setWalkInLoading] = useState(false);
-  const [selectedClinicianId, setSelectedClinicianId] = useState('chandrakanth');
-  const [cardActionId, setCardActionId] = useState<string | null>(null);
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
-  const [activeEmergencies, setActiveEmergencies] = useState<EmergencyClinicalCase[]>([]);
-  const [emergencyArchive, setEmergencyArchive] = useState<EmergencyClinicalCase[]>([]);
-  const [selectedEmergency, setSelectedEmergency] = useState<EmergencyClinicalCase | null>(null);
-  const [isEmergencyModalOpen, setIsEmergencyModalOpen] = useState(false);
-  const [emergencyNotes, setEmergencyNotes] = useState('');
-  const [emergencyDiagnosis, setEmergencyDiagnosis] = useState('');
-  const [emergencyMeds, setEmergencyMeds] = useState('');
-  const [emergencyVitals, setEmergencyVitals] = useState({
-    bp: '',
-    spo2: '',
-    pulse: '',
-    temp: '',
-    gcs: '',
-  });
-  const [isResolvingEmergency, setIsResolvingEmergency] = useState(false);
+  const [diagnosis, setDiagnosis] = useState('');
+  const [clinicalNotes, setClinicalNotes] = useState('');
+  const [doctorAdvice, setDoctorAdvice] = useState('');
+  const [medications, setMedications] = useState<MedicationRow[]>([]);
+  const [drugInput, setDrugInput] = useState('');
+  const [dosageInput, setDosageInput] = useState('1-0-1');
+  const [durationInput, setDurationInput] = useState('3 Days');
+  const [isFinalizing, setIsFinalizing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
 
-  const assignedDoctorId = CLINICIAN_DOCTOR_IDS[selectedClinicianId] ?? 'RH-D02';
-
-  const fetchActiveEmergencies = useCallback(async () => {
-    const supabase = createClient();
-    try {
-      const [active, archive] = await Promise.all([
-        loadAssignedEmergencyCases(supabase, assignedDoctorId),
-        loadEmergencyClinicalArchive(supabase),
-      ]);
-      setActiveEmergencies(active.filter((row) => row.doctor_bypass_triggered));
-      setEmergencyArchive(
-        archive.filter((row) => row.assigned_doctor_id === assignedDoctorId),
-      );
-    } catch (err) {
-      console.error('Emergency triage fetch error:', err);
-    }
-  }, [assignedDoctorId]);
+  const [rightTab, setRightTab] = useState<'history' | 'emergency'>('history');
+  const [patientHistory, setPatientHistory] = useState<HistoryItem[]>([]);
+  const [activeEmergencies, setActiveEmergencies] = useState<EmergencyRecord[]>([]);
+  const [emergencyArchive, setEmergencyArchive] = useState<EmergencyRecord[]>([]);
 
   useEffect(() => {
-    void fetchActiveEmergencies();
+    const raw =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('active_doctor_session') || sessionStorage.getItem('active_doctor_session')
+        : null;
 
-    const supabase = createClient();
-    const channel = supabase
-      .channel(`doctor_dashboard_emergency_${assignedDoctorId}`)
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'emergency_triage' },
-        () => void fetchActiveEmergencies(),
-      )
-      .subscribe();
+    if (!raw) {
+      router.replace('/doctor/login');
+      return;
+    }
 
-    return () => {
-      void supabase.removeChannel(channel);
-    };
-  }, [assignedDoctorId, fetchActiveEmergencies]);
-
-  const openEmergencyTreatment = async (emergency: EmergencyClinicalCase) => {
-    if (emergency.status === 'active') {
-      const supabase = createClient();
-      const result = await attendEmergencyCase(supabase, emergency.id);
-      if (!result.ok) {
-        toast.error(result.error ?? 'Could not open emergency case');
+    try {
+      const parsed = JSON.parse(raw) as ActiveDoctorSession;
+      if (!parsed.doctorId || !parsed.doctorName) {
+        router.replace('/doctor/login');
         return;
       }
+      setSession(parsed);
+    } catch {
+      router.replace('/doctor/login');
     }
-    setSelectedEmergency({ ...emergency, status: 'in_treatment' });
-    setEmergencyNotes(emergency.doctor_prescription_notes ?? '');
-    setEmergencyDiagnosis('');
-    setEmergencyMeds('');
-    setEmergencyVitals({
-      bp: emergency.bp && emergency.bp !== 'Pending' ? emergency.bp : '',
-      spo2: emergency.spo2 != null ? String(emergency.spo2) : '',
-      pulse: emergency.pulse != null ? String(emergency.pulse) : '',
-      temp: emergency.temp != null ? String(emergency.temp) : '',
-      gcs: emergency.gcs != null ? String(emergency.gcs) : '',
-    });
-    setIsEmergencyModalOpen(true);
-  };
+  }, [router]);
 
-  const closeEmergencyModal = () => {
-    setIsEmergencyModalOpen(false);
-    setSelectedEmergency(null);
-    setEmergencyNotes('');
-    setEmergencyDiagnosis('');
-    setEmergencyMeds('');
-    setEmergencyVitals({ bp: '', spo2: '', pulse: '', temp: '', gcs: '' });
-  };
+  const fetchCockpitData = useCallback(async () => {
+    if (!session?.doctorId || !session?.doctorName) return;
 
-  const handleResolveEmergency = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!selectedEmergency) return;
-
-    setIsResolvingEmergency(true);
-    const supabase = createClient();
-
-    const clinicalSummary = [
-      emergencyDiagnosis.trim() ? `Diagnosis: ${emergencyDiagnosis.trim()}` : null,
-      emergencyNotes.trim() ? `Interventions: ${emergencyNotes.trim()}` : null,
-      emergencyMeds.trim() ? `Medications: ${emergencyMeds.trim()}` : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
-
-    const medications = emergencyMeds
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => ({ name: line, recorded_at: new Date().toISOString() }));
-
-    const result = await completeEmergencyCase(supabase, selectedEmergency.id, {
-      bp: emergencyVitals.bp.trim() || 'Pending',
-      spo2: emergencyVitals.spo2.trim() ? Number(emergencyVitals.spo2) : null,
-      pulse: emergencyVitals.pulse.trim() ? Number(emergencyVitals.pulse) : null,
-      temp: emergencyVitals.temp.trim() ? Number(emergencyVitals.temp) : null,
-      gcs: emergencyVitals.gcs.trim() ? Number(emergencyVitals.gcs) : null,
-      doctor_prescription_notes: clinicalSummary || emergencyNotes.trim(),
-      medications,
-      disposition: 'completed',
-    });
-
-    setIsResolvingEmergency(false);
-
-    if (!result.ok) {
-      toast.error(result.error ?? 'Failed to complete emergency case');
-      return;
-    }
-
-    toast.success(`${selectedEmergency.patient_name} stabilized — returning to OPD queue`);
-    closeEmergencyModal();
-    await fetchActiveEmergencies();
-  };
-
-  const pendingEmergencies = activeEmergencies.filter(
-    (row) => row.status === 'active' || row.status === 'in_treatment',
-  );
-  const flashEmergency = pendingEmergencies[0] ?? null;
-
-  const fetchLiveAppointments = useCallback(async (silent = false, clinicianId = selectedClinicianId) => {
-    const supabase = createClient();
     try {
-      if (!silent) setIsLoading(true);
+      setIsLoading(true);
+      const currentDocId = session.doctorId.trim().toLowerCase();
+      const currentDocName = session.doctorName.replace(/^Dr\.?\s*/i, '').trim().toLowerCase();
 
-      const clinicianPattern = getClinicianIlikePattern(clinicianId);
-
-      let patientAppointmentsQuery = supabase
-        .from('patient_appointments')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (clinicianPattern) {
-        patientAppointmentsQuery = patientAppointmentsQuery.ilike(
-          'doctor_name',
-          `%${clinicianPattern}%`,
-        );
-      }
-
-      const [appointmentsRes, patientAppointmentsRes] = await Promise.all([
+      const [res1, res2] = await Promise.all([
+        supabase.from('patient_appointments').select('*').order('created_at', { ascending: false }),
         supabase.from('appointments').select('*').order('created_at', { ascending: false }),
-        patientAppointmentsQuery,
       ]);
 
-      if (appointmentsRes.error) {
-        console.error('❌ Supabase Fetch Error (appointments):', appointmentsRes.error.message);
-      }
-      if (patientAppointmentsRes.error) {
-        console.error(
-          '❌ Supabase Fetch Error (patient_appointments):',
-          patientAppointmentsRes.error.message,
-        );
-      }
+      const isForCurrentDoctor = (item: QueueAppointment) => {
+        const itemDocId = (item.doctor_id || item.doctor_code || '').trim().toLowerCase();
+        const itemDocName = (item.doctor_name || '').replace(/^Dr\.?\s*/i, '').trim().toLowerCase();
 
-      const mergedRaw: Record<string, unknown>[] = [];
-      const seenIds = new Set<string>();
-
-      for (const row of (appointmentsRes.data ?? []) as Record<string, unknown>[]) {
-        const id = String(row.appointment_id ?? row.id ?? '');
-        if (id && !seenIds.has(id)) {
-          seenIds.add(id);
-          mergedRaw.push(row);
-        }
-      }
-
-      for (const row of (patientAppointmentsRes.data ?? []) as Record<string, unknown>[]) {
-        const id = String(row.id ?? row.appointment_id ?? '');
-        if (id && !seenIds.has(id)) {
-          seenIds.add(id);
-          mergedRaw.push({
-            ...row,
-            status: row.queue_status ?? row.status,
-            appointment_time: row.slot_time ?? row.appointment_time,
-          });
-        }
-      }
-
-      console.log('✅ Fetched Appointments Data:', mergedRaw);
-
-      if (mergedRaw.length > 0) {
-        const normalized = await enrichAppointmentsWithProfiles(mergedRaw);
-        setAppointments(normalized);
-
-        const waitingOrActive = normalized.filter(
-          (a) => a.status.toUpperCase() !== 'COMPLETED',
+        const idMatches = Boolean(itemDocId && currentDocId && itemDocId === currentDocId);
+        const nameMatches = Boolean(
+          itemDocName &&
+            currentDocName &&
+            (itemDocName.includes(currentDocName) || currentDocName.includes(itemDocName)),
         );
 
-        if (waitingOrActive.length > 0) {
-          const inConsultationPatient = waitingOrActive.find((a) =>
-            isInConsultationStatus(a.status),
-          );
-          setActivePatient(inConsultationPatient || waitingOrActive[0]);
-        } else {
-          setActivePatient(null);
-        }
-      } else {
-        setAppointments([]);
-        setActivePatient(null);
-      }
+        return idMatches || nameMatches;
+      };
 
-      setHasLoadedOnce(true);
+      const rows1 = (res1.data ?? []) as QueueAppointment[];
+      const rows2 = (res2.data ?? []) as QueueAppointment[];
+
+      const list1 = rows1.filter((item: QueueAppointment) => isForCurrentDoctor(item)).map((item: QueueAppointment) => ({
+        ...item,
+        _source_table: 'patient_appointments',
+        patient_name: item.patient_name || item.name || '',
+        chief_complaint: item.reason_for_visit || item.chief_complaint || '',
+        status: item.queue_status || item.status || 'WAITING',
+      }));
+
+      const list2 = rows2.filter((item: QueueAppointment) => isForCurrentDoctor(item)).map((item: QueueAppointment) => ({
+        ...item,
+        _source_table: 'appointments',
+        patient_name: item.patient_name || item.name || '',
+        chief_complaint: item.chief_complaint || item.reason_for_visit || '',
+        status: item.status || item.queue_status || 'WAITING',
+      }));
+
+      const map = new Map<string, QueueAppointment>();
+      [...list1, ...list2].forEach((item) => {
+        const key = item.id ? String(item.id) : `${item.patient_name}_${item.token_number}_${item.created_at}`;
+        if (!map.has(key)) map.set(key, item);
+      });
+
+      const merged = Array.from(map.values()).sort((a, b) => {
+        const tokenA = parseInt(String(a.token_number || '').replace(/\D/g, ''), 10) || 999;
+        const tokenB = parseInt(String(b.token_number || '').replace(/\D/g, ''), 10) || 999;
+        return tokenA - tokenB;
+      });
+
+      setAppointments(merged);
+
+      const isCompletedStatus = (s?: string) => {
+        const st = (s || '').trim().toUpperCase();
+        return st === 'COMPLETED' || st === 'DONE';
+      };
+
+      const waiting = merged.filter((a) => !isCompletedStatus(a.status));
+
+      setActivePatient((prev) => {
+        if (!prev && waiting.length > 0) return waiting[0];
+        if (prev) {
+          const updated = merged.find((a) => a.id === prev.id);
+          if (updated && isCompletedStatus(updated.status)) return waiting[0] || null;
+          return updated || prev;
+        }
+        return null;
+      });
+
+      const { data: emgActive } = await supabase
+        .from('emergency_admissions')
+        .select('*')
+        .eq('status', 'EMERGENCY_ACTIVE')
+        .order('admitted_at', { ascending: false });
+      setActiveEmergencies((emgActive as EmergencyRecord[]) || []);
+
+      const { data: emgAll } = await supabase
+        .from('emergency_admissions')
+        .select('*')
+        .order('admitted_at', { ascending: false })
+        .limit(10);
+      setEmergencyArchive((emgAll as EmergencyRecord[]) || []);
     } catch (err) {
-      console.error('❌ Unexpected fetch error:', err);
+      console.error('Data fetch error:', err);
     } finally {
       setIsLoading(false);
-      setIsRefreshing(false);
     }
-  }, [selectedClinicianId]);
+  }, [session]);
 
   useEffect(() => {
-    void fetchLiveAppointments(false, selectedClinicianId);
+    if (!session) return;
+    fetchCockpitData();
 
-    const supabase = createClient();
     const channel = supabase
-      .channel('permanent_patient_appointments_sync')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'patient_appointments' },
-        () => {
-          void fetchLiveAppointments(true, selectedClinicianId);
-        },
+      .channel(`doc_node_${session.doctorId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'patient_appointments' }, () =>
+        fetchCockpitData(),
       )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'appointments' },
-        () => {
-          void fetchLiveAppointments(true, selectedClinicianId);
-        },
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, () =>
+        fetchCockpitData(),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_admissions' }, () =>
+        fetchCockpitData(),
       )
       .subscribe();
 
-    const pollInterval = window.setInterval(() => {
-      void fetchLiveAppointments(true, selectedClinicianId);
-    }, 3000);
-
-    const onWindowFocus = () => {
-      void fetchLiveAppointments(true, selectedClinicianId);
-    };
-    window.addEventListener('focus', onWindowFocus);
+    const interval = setInterval(fetchCockpitData, 3000);
 
     return () => {
-      void supabase.removeChannel(channel);
-      window.clearInterval(pollInterval);
-      window.removeEventListener('focus', onWindowFocus);
+      supabase.removeChannel(channel);
+      clearInterval(interval);
     };
-  }, [fetchLiveAppointments, selectedClinicianId]);
+  }, [fetchCockpitData, session]);
 
-  const filteredAppointments = appointments.filter((appt) =>
-    appointmentMatchesClinician(appt, selectedClinicianId),
-  );
+  const handleSelectPatient = async (patient: QueueAppointment) => {
+    setActivePatient(patient);
+    setDiagnosis(patient.chief_complaint || patient.reason_for_visit || '');
+    setClinicalNotes('');
+    setDoctorAdvice('');
+    setMedications([]);
+    setStatusMessage(null);
 
-  const waitingQueue = filteredAppointments.filter((a) => isWaitingStatus(a.status));
-  const inConsultationQueue = filteredAppointments.filter((a) =>
-    isInConsultationStatus(a.status),
-  );
-  const completedQueue = filteredAppointments.filter(
-    (a) => a.status.toUpperCase() === 'COMPLETED',
-  );
-  const liveQueue = [...inConsultationQueue, ...waitingQueue];
-  const upcomingBookings = getUpcomingBookings(filteredAppointments);
-  const nextUpcoming = getNextUpcomingBooking(filteredAppointments);
-
-  const totalPatients = filteredAppointments.length;
-  const totalWaiting = waitingQueue.length;
-  const inConsultation = inConsultationQueue.length;
-  const completedToday = completedQueue.length;
-
-  const canCallNext = waitingQueue.length > 0 && !callingNext;
-  const canStartConsultation = Boolean(activePatient);
-
-  const handleRefresh = () => {
-    setIsRefreshing(true);
-    void fetchLiveAppointments();
-  };
-
-  const handleCallNext = async () => {
-    if (waitingQueue.length === 0) {
-      toast.info('No patients waiting in queue. Patient bookings from the app will appear automatically.');
-      return;
-    }
-
-    setCallingNext(true);
     try {
-      const next = await callNextPatientInQueue(filteredAppointments, activePatient);
-      if (next) {
-        await fetchLiveAppointments();
-        toast.success(`Called ${getRegisteredPatientName(next)} into consultation`);
+      const pName = (patient.patient_name || patient.name || '').trim();
+      const pId = patient.patient_id ? String(patient.patient_id) : null;
+
+      if (!pName && !pId) {
+        setPatientHistory([]);
+        return;
       }
-    } catch (err) {
-      console.error('[Call Next]:', err);
-      toast.error('Failed to call next patient');
-    } finally {
-      setCallingNext(false);
-    }
-  };
 
-  const handleBypass = async () => {
-    if (waitingQueue.length === 0) {
-      toast.info('No patients waiting in queue');
-      return;
-    }
+      let qConsult = supabase.from('consultations').select('*').order('created_at', { ascending: false });
+      let qPrescript = supabase.from('prescriptions').select('*').order('created_at', { ascending: false });
 
-    setBypassing(true);
-    try {
-      const next = await bypassToNextWaiting(filteredAppointments);
-      if (next) {
-        await fetchLiveAppointments();
-        toast.success(`Emergency bypass: ${getRegisteredPatientName(next)} moved to consultation`);
+      if (pId) {
+        qConsult = qConsult.or(`patient_id.eq.${pId},patient_name.ilike.%${pName}%`);
+        qPrescript = qPrescript.or(`patient_id.eq.${pId},patient_name.ilike.%${pName}%`);
+      } else {
+        qConsult = qConsult.ilike('patient_name', `%${pName}%`);
+        qPrescript = qPrescript.ilike('patient_name', `%${pName}%`);
       }
-    } catch (err) {
-      console.error('[Emergency Bypass]:', err);
-      toast.error('Emergency bypass failed');
-    } finally {
-      setBypassing(false);
-    }
-  };
 
-  const handleStartConsultation = async () => {
-    if (!activePatient?.id) {
-      toast.error('No active patient selected for consultation');
-      return;
-    }
+      const [cRes, pRes] = await Promise.all([qConsult, qPrescript]);
 
-    await handleStartConsultationForCard(activePatient);
-  };
+      const consultRows = (cRes.data ?? []) as Record<string, unknown>[];
+      const prescriptionRows = (pRes.data ?? []) as Record<string, unknown>[];
 
-  const handleStartConsultationForCard = async (appt: LiveAppointmentRecord) => {
-    if (!appt.id) {
-      toast.error('Invalid appointment record');
-      return;
-    }
-
-    setCardActionId(appt.id);
-
-    await tryMarkInConsultation(appt.id);
-
-    setActivePatient({ ...appt, status: 'IN_CONSULTATION' });
-    router.push(`/doctor/consultations?appointmentId=${appt.id}`);
-
-    setCardActionId(null);
-  };
-
-  const handleMarkDone = async (patientToComplete?: LiveAppointmentRecord) => {
-    const target = patientToComplete || activePatient;
-    if (!target) return;
-
-    const targetId = target.id;
-    const targetName = getRegisteredPatientName(target);
-    const targetToken = target.token_number;
-
-    setCardActionId(targetId);
-
-    try {
-      const supabase = createClient();
-      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        targetId || '',
+      const timeline: HistoryItem[] = [
+        ...consultRows.map((c: Record<string, unknown>) => ({
+          ...(c as HistoryItem),
+          type: 'CONSULTATION',
+        })),
+        ...prescriptionRows.map((p: Record<string, unknown>) => ({
+          ...(p as HistoryItem),
+          type: 'PRESCRIPTION',
+        })),
+      ].sort((a: HistoryItem, b: HistoryItem) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       );
 
-      if (isUUID) {
-        await supabase
+      setPatientHistory(timeline);
+    } catch {
+      setPatientHistory([]);
+    }
+  };
+
+  const handleAddMedication = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!drugInput.trim()) return;
+    setMedications((prev) => [
+      ...prev,
+      { name: drugInput.trim(), dosage: dosageInput, timing: 'After Food', duration: durationInput },
+    ]);
+    setDrugInput('');
+  };
+
+  const handleDoneAndDispatch = async () => {
+    if (!activePatient || !session) return;
+
+    setIsFinalizing(true);
+    setStatusMessage(null);
+
+    const targetId = String(activePatient.id);
+    const pName = activePatient.patient_name || activePatient.name || '';
+    const pId = activePatient.patient_id ? String(activePatient.patient_id) : null;
+    const complaint = activePatient.chief_complaint || activePatient.reason_for_visit || '';
+
+    if (!pId) {
+      setStatusMessage({
+        type: 'error',
+        text: 'Cannot dispatch prescription without a verified patient_id on the appointment record.',
+      });
+      setIsFinalizing(false);
+      return;
+    }
+
+    if (!pName) {
+      setStatusMessage({ type: 'error', text: 'Cannot dispatch prescription without a verified patient name.' });
+      setIsFinalizing(false);
+      return;
+    }
+
+    try {
+      const { error: rxError } = await supabase.from('prescriptions').insert([
+        {
+          appointment_id: targetId,
+          patient_id: pId,
+          patient_name: pName,
+          doctor_name: session.doctorName,
+          doctor_id: session.doctorId,
+          diagnosis: diagnosis.trim() || complaint,
+          medications,
+          instructions: doctorAdvice.trim() || '',
+          status: 'DISPATCHED',
+          created_at: new Date().toISOString(),
+        },
+      ]);
+
+      if (rxError) throw rxError;
+
+      await Promise.allSettled([
+        supabase
           .from('patient_appointments')
-          .update({ queue_status: 'COMPLETED', status: 'COMPLETED' })
-          .eq('id', targetId);
-
-        await supabase.from('appointments').update({ status: 'COMPLETED' }).eq('id', targetId);
-
-        await supabase
+          .update({ status: 'COMPLETED', queue_status: 'COMPLETED' })
+          .eq('id', targetId),
+        supabase
           .from('appointments')
-          .update({ status: 'COMPLETED' })
-          .eq('appointment_id', targetId);
-      } else if (targetToken) {
-        await supabase
-          .from('patient_appointments')
-          .update({ queue_status: 'COMPLETED', status: 'COMPLETED' })
-          .eq('token_number', targetToken);
-
-        await supabase
-          .from('appointments')
-          .update({ status: 'COMPLETED' })
-          .eq('token_number', targetToken);
-      } else {
-        await supabase
-          .from('patient_appointments')
-          .update({ queue_status: 'COMPLETED', status: 'COMPLETED' })
-          .eq('patient_name', targetName);
-
-        await supabase
-          .from('appointments')
-          .update({ status: 'COMPLETED' })
-          .eq('patient_name', targetName);
-      }
+          .update({ status: 'COMPLETED', queue_status: 'COMPLETED' })
+          .eq('id', targetId),
+      ]);
 
       await supabase.from('consultations').insert([
         {
-          patient_name: targetName,
-          doctor_name: doctorName || 'Dr CHANDRAKANTH S KESARI',
-          chief_complaint: target.chief_complaint || target.symptoms || 'General Consultation',
+          appointment_id: targetId,
+          patient_id: pId,
+          patient_name: pName,
+          doctor_name: session.doctorName,
+          doctor_id: session.doctorId,
+          chief_complaint: complaint,
+          diagnosis: diagnosis.trim() || complaint,
+          clinical_notes: clinicalNotes.trim() || '',
           status: 'COMPLETED',
           created_at: new Date().toISOString(),
         },
       ]);
 
-      setAppointments((prev) => {
-        const updated = prev.map((item) =>
-          item.id === targetId ||
-          (targetToken && item.token_number === targetToken) ||
-          getRegisteredPatientName(item) === targetName
-            ? { ...item, status: 'COMPLETED' }
-            : item,
-        );
-
-        const remainingWaiting = updated.filter(
-          (a) =>
-            a.id !== targetId &&
-            (!targetToken || a.token_number !== targetToken) &&
-            getRegisteredPatientName(a) !== targetName &&
-            a.status?.toUpperCase() !== 'COMPLETED' &&
-            (isWaitingStatus(a.status) || isInConsultationStatus(a.status)),
-        );
-
-        setActivePatient(remainingWaiting[0] || null);
-        return updated;
-      });
-
-      setActiveTab('completed');
-      toast.success(`Encounter with ${targetName} completed.`);
-
-      setTimeout(() => {
-        void fetchLiveAppointments(true);
-      }, 400);
+      setStatusMessage({ type: 'success', text: `Prescription dispatched successfully for ${pName}.` });
+      setDiagnosis('');
+      setClinicalNotes('');
+      setDoctorAdvice('');
+      setMedications([]);
+      fetchCockpitData();
     } catch (err: unknown) {
-      console.error('Error completing appointment:', err);
-      toast.error('Could not complete appointment in database');
+      console.error('Dispatch failed:', err);
+      const message = err instanceof Error ? err.message : 'Failed to dispatch prescription to patient app.';
+      setStatusMessage({ type: 'error', text: message });
     } finally {
-      setCardActionId(null);
+      setIsFinalizing(false);
     }
   };
 
-  const handleAdmitFromBookings = async (appt: LiveAppointmentRecord) => {
-    setAdmittingId(appt.id);
-    try {
-      await admitAppointmentToQueue(appt.id, 'IN_CONSULTATION');
-      await fetchLiveAppointments();
-      toast.success(`${getRegisteredPatientName(appt)} admitted from bookings`);
-    } catch (err) {
-      console.error('[Admit from bookings]:', err);
-      toast.error('Failed to admit patient from bookings');
-    } finally {
-      setAdmittingId(null);
-    }
+  const handleLogout = () => {
+    localStorage.removeItem('active_doctor_session');
+    sessionStorage.removeItem('active_doctor_session');
+    router.replace('/doctor/login');
   };
 
-  const handleQuickWalkIn = async () => {
-    const name = window.prompt('Enter walk-in patient name for quick triage intake:');
-    if (!name?.trim()) return;
+  if (!session) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-[#F8FAFC]">
+        <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+          <RefreshCw className="w-4 h-4 animate-spin text-teal-600" />
+          Authenticating Clinician Node...
+        </div>
+      </div>
+    );
+  }
 
-    setWalkInLoading(true);
-    try {
-      await createWalkInAppointment(name.trim());
-      await fetchLiveAppointments();
-      toast.success(`Walk-in patient "${name.trim()}" added to OPD list`);
-    } catch (err) {
-      console.error('[Quick walk-in]:', err);
-      toast.error('Failed to add walk-in patient');
-    } finally {
-      setWalkInLoading(false);
-    }
+  const isCompleted = (status?: string) => {
+    const s = (status || '').trim().toUpperCase();
+    return s === 'COMPLETED' || s === 'DONE';
   };
+
+  const waitingList = appointments.filter((a) => !isCompleted(a.status));
+  const completedList = appointments.filter((a) => isCompleted(a.status));
+
+  const filteredQueue = (queueTab === 'waiting' ? waitingList : completedList).filter((item) => {
+    const name = item.patient_name || '';
+    const token = String(item.token_number || '');
+    const q = searchQuery.toLowerCase().trim();
+    return name.toLowerCase().includes(q) || token.toLowerCase().includes(q);
+  });
 
   return (
-    <div className="w-full min-h-screen bg-[#F4FAF8] p-4 md:p-6 space-y-4">
-      {flashEmergency && !isEmergencyModalOpen && (
-        <div className="relative overflow-hidden rounded-2xl border-2 border-rose-500 bg-gradient-to-r from-rose-100 via-amber-50 to-rose-100 px-5 py-4 shadow-lg animate-pulse">
-          <div className="absolute inset-0 bg-rose-500/10 animate-[pulse_1.2s_ease-in-out_infinite]" />
-          <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-rose-600 p-2.5 text-white shadow-md">
-                <Siren className="h-5 w-5 animate-bounce" />
-              </div>
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[0.2em] text-rose-700">
-                  Emergency SOS — Immediate Response Required
-                </p>
-                <p className="text-base font-black text-[#0E2924]">
-                  {flashEmergency.patient_name} · {flashEmergency.priority_tier}
-                </p>
-                <p className="mt-0.5 text-xs font-semibold text-[#227B6B]">{flashEmergency.chief_complaint}</p>
-                <p className="mt-1 text-[11px] font-medium text-slate-500">
-                  UHID {flashEmergency.patient_uhid || '—'} · Arrived {flashEmergency.arrival_time ?? '—'}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => void openEmergencyTreatment(flashEmergency)}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-rose-600 px-5 py-3 text-xs font-black text-white shadow-md transition hover:bg-rose-700 active:scale-95"
-            >
-              <Stethoscope className="h-4 w-4" />
-              Attend Emergency Case
-            </button>
+    <div className="flex flex-col h-screen overflow-hidden bg-[#F8FAFC] text-slate-800 font-sans">
+      <header className="h-16 border-b border-slate-200 bg-white px-6 flex items-center justify-between shrink-0 z-30">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-teal-50 border border-teal-100 flex items-center justify-center">
+            <Stethoscope className="w-5 h-5 text-teal-700" />
           </div>
-          {pendingEmergencies.length > 1 && (
-            <p className="relative mt-2 text-[11px] font-bold text-rose-700">
-              +{pendingEmergencies.length - 1} additional bypass case(s) awaiting response
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="font-extrabold text-base text-slate-900">Regal Clinical Workstation</h1>
+              <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Live Node Sync
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {session.department} • Isolated Clinician Environment
             </p>
-          )}
-        </div>
-      )}
-
-      {isEmergencyModalOpen && selectedEmergency && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm">
-          <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-2xl border-2 border-rose-300 bg-white shadow-2xl">
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-rose-100 bg-rose-50 px-6 py-4">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-rose-600" />
-                <div>
-                  <h2 className="text-sm font-black text-[#0E2924]">Emergency Treatment & Stabilization</h2>
-                  <p className="text-[11px] font-semibold text-[#227B6B]">{selectedEmergency.patient_name}</p>
-                </div>
-              </div>
-              <button type="button" onClick={closeEmergencyModal} className="text-slate-400 hover:text-slate-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleResolveEmergency} className="space-y-4 p-6 text-xs">
-              <div className="rounded-xl border border-[#D5E8E3] bg-[#F4FAF8] p-4">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-[#227B6B]">Chief Complaint</p>
-                <p className="mt-1 text-sm font-semibold text-[#0E2924]">{selectedEmergency.chief_complaint}</p>
-              </div>
-
-              <div>
-                <p className="mb-2 flex items-center gap-1.5 font-bold text-[#0E2924]">
-                  <HeartPulse className="h-3.5 w-3.5 text-rose-600" />
-                  Bedside Vitals
-                </p>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                  {(
-                    [
-                      ['bp', 'BP', 'text', '120/80'],
-                      ['spo2', 'SpO2 %', 'number', '98'],
-                      ['pulse', 'Pulse', 'number', '75'],
-                      ['temp', 'Temp °C', 'number', '37.0'],
-                      ['gcs', 'GCS', 'number', '15'],
-                    ] as const
-                  ).map(([key, label, type, placeholder]) => (
-                    <div key={key}>
-                      <label className="mb-0.5 block text-[10px] font-semibold text-[#227B6B]">{label}</label>
-                      <input
-                        type={type}
-                        step={key === 'temp' ? '0.1' : '1'}
-                        placeholder={placeholder}
-                        value={emergencyVitals[key]}
-                        onChange={(event) =>
-                          setEmergencyVitals({ ...emergencyVitals, [key]: event.target.value })
-                        }
-                        className="w-full rounded-lg border border-[#D5E8E3] px-2 py-2 text-center text-xs font-bold"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1 block font-bold text-[#0E2924]">Working Diagnosis</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Acute STEMI, tension pneumothorax, polytrauma…"
-                  value={emergencyDiagnosis}
-                  onChange={(event) => setEmergencyDiagnosis(event.target.value)}
-                  className="w-full rounded-xl border border-[#D5E8E3] bg-[#F4FAF8] px-3 py-2 text-xs font-medium"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-bold text-[#0E2924]">Emergency Intervention Notes</label>
-                <textarea
-                  required
-                  rows={3}
-                  placeholder="IV access, fluids, procedures, disposition plan…"
-                  value={emergencyNotes}
-                  onChange={(event) => setEmergencyNotes(event.target.value)}
-                  className="w-full rounded-xl border border-[#D5E8E3] bg-[#F4FAF8] px-3 py-2 text-xs"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block font-bold text-[#0E2924]">Medications (one per line)</label>
-                <textarea
-                  rows={3}
-                  placeholder="Morphine 2mg IV&#10;Adrenaline infusion&#10;Ceftriaxone 1g IV"
-                  value={emergencyMeds}
-                  onChange={(event) => setEmergencyMeds(event.target.value)}
-                  className="w-full rounded-xl border border-[#D5E8E3] bg-[#F4FAF8] px-3 py-2 text-xs font-mono"
-                />
-              </div>
-
-              <div className="flex flex-col-reverse gap-2 border-t border-[#D5E8E3] pt-4 sm:flex-row sm:justify-end">
-                <button
-                  type="button"
-                  onClick={closeEmergencyModal}
-                  disabled={isResolvingEmergency}
-                  className="rounded-xl border border-[#D5E8E3] px-4 py-2.5 font-bold text-[#113831] hover:bg-[#F4FAF8] disabled:opacity-50"
-                >
-                  Return to OPD Queue
-                </button>
-                <button
-                  type="submit"
-                  disabled={isResolvingEmergency}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#227B6B] px-5 py-2.5 font-black text-white hover:bg-[#113831] disabled:opacity-50"
-                >
-                  {isResolvingEmergency ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <CheckCircle2 className="h-4 w-4" />
-                  )}
-                  Complete & Discharge to Ward / Stabilize
-                </button>
-              </div>
-            </form>
           </div>
         </div>
-      )}
-      <div className="bg-white rounded-2xl p-4 md:p-5 border border-[#D5E8E3] shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-        <div className="flex-1">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-xl md:text-2xl font-black text-[#0E2924] tracking-tight">
-              OPD Command Center
-            </h1>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#EAF5F2] text-[#227B6B] border border-[#A6E2D8]">
-              <span className="w-2 h-2 rounded-full bg-[#227B6B] animate-pulse" />
-              Live Sync • 3s Polling
-            </span>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-[#113831] text-[#A6E2D8]">
-              <Building2 className="w-3 h-3" />
-              {REGAL_HOSPITAL}
-            </span>
-          </div>
-          <p className="text-xs text-[#227B6B] mt-1 font-semibold flex flex-wrap items-center gap-2">
-            <span>{doctorName}</span>
-            <span>•</span>
-            <span>{department}</span>
-            <span>•</span>
-            <span>{currentDate}</span>
-          </p>
-        </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <div className="relative min-w-[240px]">
-            <select
-              value={selectedClinicianId}
-              onChange={(e) => setSelectedClinicianId(e.target.value)}
-              className="w-full appearance-none rounded-xl border border-[#D5E8E3] bg-[#F4FAF8] px-3 py-2.5 pr-9 text-xs font-bold text-[#113831] focus:outline-none focus:ring-2 focus:ring-[#227B6B]/30"
-            >
-              {CLINICIAN_OPTIONS.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#227B6B]" />
+        <div className="flex items-center gap-3">
+          <div className="bg-slate-50 border border-slate-200 px-3.5 py-1.5 rounded-xl flex items-center gap-2 text-xs">
+            <div className="w-2 h-2 rounded-full bg-teal-600" />
+            <span className="font-bold text-slate-800">{session.doctorName}</span>
+            <span className="text-[10px] text-teal-700 font-mono font-bold">({session.doctorId})</span>
           </div>
 
           <button
-            onClick={handleRefresh}
-            className="px-3.5 py-2.5 bg-[#113831] hover:bg-[#227B6B] text-white font-semibold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 active:scale-95"
+            type="button"
+            onClick={fetchCockpitData}
+            className="p-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-600 transition-all cursor-pointer"
+            title="Refresh Live Data"
           >
-            <RotateCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
-            Refresh Data
+            <RefreshCw className="w-4 h-4" />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="p-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl transition-all cursor-pointer flex items-center gap-1 text-xs font-bold"
+          >
+            <LogOut className="w-4 h-4" />
+            <span className="hidden sm:inline">Logout</span>
           </button>
         </div>
-      </div>
+      </header>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-white p-4 rounded-2xl border border-[#D5E8E3] shadow-sm">
-          <div className="flex items-center justify-between text-[#227B6B]">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Total Patients</span>
-            <Users className="w-4 h-4" />
+      {activeEmergencies.length > 0 && (
+        <div className="bg-rose-50 border-b border-rose-200 text-rose-900 px-6 py-2 flex items-center justify-between text-xs shrink-0 animate-pulse">
+          <div className="flex items-center gap-2 font-semibold">
+            <Siren className="w-4 h-4 text-rose-600" />
+            <span>
+              <strong>CODE RED ALERT:</strong> Patient{' '}
+              <span className="underline font-bold">{activeEmergencies[0].patient_name}</span> in Bed{' '}
+              {activeEmergencies[0].bed_number || '—'}
+            </span>
           </div>
-          <p className="text-2xl font-black text-[#0E2924] mt-1">{totalPatients}</p>
+          <button
+            type="button"
+            onClick={() => setRightTab('emergency')}
+            className="bg-rose-600 hover:bg-rose-700 text-white font-bold px-3 py-1 rounded-lg text-[11px] cursor-pointer"
+          >
+            Open ER Status →
+          </button>
         </div>
+      )}
 
-        <div className="bg-white p-4 rounded-2xl border border-[#D5E8E3] shadow-sm">
-          <div className="flex items-center justify-between text-[#227B6B]">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Waiting Queue</span>
-            <Clock className="w-4 h-4" />
-          </div>
-          <p className="text-2xl font-black text-[#113831] mt-1">{totalWaiting}</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-2xl border border-[#D5E8E3] shadow-sm">
-          <div className="flex items-center justify-between text-[#227B6B]">
-            <span className="text-[11px] font-bold uppercase tracking-wider">In Consultation</span>
-            <Activity className="w-4 h-4" />
-          </div>
-          <p className="text-2xl font-black text-[#227B6B] mt-1">{inConsultation}</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-2xl border border-[#D5E8E3] shadow-sm">
-          <div className="flex items-center justify-between text-[#227B6B]">
-            <span className="text-[11px] font-bold uppercase tracking-wider">Completed Today</span>
-            <CheckCircle2 className="w-4 h-4" />
-          </div>
-          <p className="text-2xl font-black text-[#113831] mt-1">{completedToday}</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-        <div className="lg:col-span-5 bg-white rounded-2xl border border-[#D5E8E3] shadow-sm p-4 space-y-3">
-          <div className="flex items-center justify-between border-b border-[#EAF5F2] pb-3">
-            <div className="flex flex-wrap gap-1.5 p-1 bg-[#F4FAF8] rounded-xl">
-              <button
-                onClick={() => setActiveTab('queue')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeTab === 'queue'
-                    ? 'bg-white text-[#0E2924] shadow-sm border border-[#D5E8E3]'
-                    : 'text-[#227B6B] hover:text-[#113831]'
-                }`}
-              >
-                Live Queue ({waitingQueue.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('appointments')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeTab === 'appointments'
-                    ? 'bg-white text-[#0E2924] shadow-sm border border-[#D5E8E3]'
-                    : 'text-[#227B6B] hover:text-[#113831]'
-                }`}
-              >
-                All Bookings ({filteredAppointments.length})
-              </button>
-              <button
-                onClick={() => setActiveTab('completed')}
-                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                  activeTab === 'completed'
-                    ? 'bg-white text-[#0E2924] shadow-sm border border-[#D5E8E3]'
-                    : 'text-[#227B6B] hover:text-[#113831]'
-                }`}
-              >
-                Completed ({completedQueue.length})
-              </button>
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-3.5 p-3.5 overflow-hidden">
+        <section className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl flex flex-col h-full overflow-hidden shadow-xs">
+          <div className="p-3.5 border-b border-slate-100 bg-slate-50/70 shrink-0">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-black tracking-wider uppercase text-slate-700 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-teal-600" />
+                1. Patient Queue
+              </span>
+              <div className="flex bg-slate-200/80 p-0.5 rounded-xl text-[11px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setQueueTab('waiting')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    queueTab === 'waiting' ? 'bg-white text-teal-900 shadow-xs' : 'text-slate-600'
+                  }`}
+                >
+                  Waiting ({waitingList.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setQueueTab('done')}
+                  className={`px-3 py-1 rounded-lg transition-all cursor-pointer ${
+                    queueTab === 'done' ? 'bg-white text-teal-900 shadow-xs' : 'text-slate-600'
+                  }`}
+                >
+                  Done ({completedList.length})
+                </button>
+              </div>
             </div>
 
-            <button
-              onClick={() => void handleCallNext()}
-              disabled={!canCallNext}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${
-                canCallNext
-                  ? 'bg-[#113831] hover:bg-[#227B6B] text-white shadow-sm'
-                  : 'bg-[#F4FAF8] text-[#A6C4BC] border border-[#D5E8E3] cursor-not-allowed'
-              }`}
-            >
-              {callingNext ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <UserCheck className="w-3.5 h-3.5" />
-              )}
-              Call Next
-            </button>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Filter patient name or token..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-teal-600"
+              />
+            </div>
           </div>
 
-          {activeTab === 'queue' && (
-            <div className="space-y-3 max-h-[480px] overflow-y-auto pr-0.5">
-              {isLoading && !hasLoadedOnce ? (
-                <div className="py-12 text-center text-[#227B6B]">
-                  <RotateCw className="w-6 h-6 animate-spin mx-auto text-[#227B6B] mb-2" />
-                  <p className="text-xs font-medium">Connecting to patient bookings...</p>
-                </div>
-              ) : liveQueue.length === 0 ? (
-                <div className="space-y-3">
-                  <div className="p-6 rounded-2xl bg-gradient-to-b from-[#F4FAF8] to-white border border-[#D5E8E3] flex flex-col items-center justify-center text-center space-y-3">
-                    <div className="relative">
-                      <div className="w-12 h-12 rounded-2xl bg-[#EAF5F2] text-[#227B6B] border border-[#A6E2D8] flex items-center justify-center shadow-xs">
-                        <Users className="w-6 h-6" />
-                      </div>
-                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#227B6B] opacity-75" />
-                        <span className="relative inline-flex rounded-full h-3 w-3 bg-[#227B6B]" />
-                      </span>
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-[#0E2924] text-sm">
-                        {upcomingBookings.length > 0
-                          ? 'Queue Standby • Upcoming Appointments Available'
-                          : 'OPD Queue is Currently Clear'}
-                      </h4>
-                      <p className="text-xs text-[#227B6B] mt-1 max-w-xs">
-                        {filteredAppointments.length > 0
-                          ? `You have ${filteredAppointments.length} scheduled booking(s) for today.`
-                          : 'Patient check-ins from the mobile app will sync here live.'}
-                      </p>
-                    </div>
-                    {filteredAppointments.length > 0 && (
-                      <button
-                        onClick={() => setActiveTab('appointments')}
-                        className="px-4 py-2 bg-[#113831] hover:bg-[#227B6B] text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 active:scale-95"
-                      >
-                        View Scheduled Bookings ({filteredAppointments.length})
-                      </button>
-                    )}
-                  </div>
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 min-h-0">
+            {isLoading ? (
+              <div className="text-center py-12 text-xs text-slate-400">Loading queue...</div>
+            ) : filteredQueue.length === 0 ? (
+              <div className="text-center py-16 text-xs text-slate-400">
+                No assigned patients found for {session.doctorName}.
+              </div>
+            ) : (
+              filteredQueue.map((patient) => {
+                const isSelected = activePatient?.id === patient.id;
+                const done = isCompleted(patient.status);
 
-                  {nextUpcoming && (
-                    <div className="p-4 rounded-xl border border-[#F5D78E]/80 bg-gradient-to-r from-[#FFF7E6]/80 to-white flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="p-2 rounded-xl bg-[#FFF7E6] text-[#8A5A00] shrink-0">
-                          <CalendarClock className="w-4 h-4" />
-                        </div>
-                        <div className="min-w-0 text-left">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-[#8A5A00]">
-                            Next Upcoming
-                          </p>
-                          <p className="font-bold text-xs text-[#0E2924] truncate">
-                            {getRegisteredPatientName(nextUpcoming)}
-                          </p>
-                          <p className="text-[11px] text-[#227B6B]">
-                            {nextUpcoming.time_slot || 'Today'} · {nextUpcoming.status}
-                          </p>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => void handleAdmitFromBookings(nextUpcoming)}
-                        disabled={admittingId === nextUpcoming.id}
-                        className="shrink-0 px-3 py-2 bg-[#113831] hover:bg-[#227B6B] disabled:opacity-60 text-white text-[11px] font-bold rounded-xl shadow-xs transition-all flex items-center gap-1 active:scale-95"
-                      >
-                        {admittingId === nextUpcoming.id ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Plus className="w-3.5 h-3.5" />
-                        )}
-                        Admit / Call
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                liveQueue.map((item, idx) => {
-                  const isSelected = activePatient?.id === item.id;
-                  const isInConsultation = isInConsultationStatus(item.status);
-                  const complaint =
-                    item.chief_complaint && item.chief_complaint !== 'OPD Review'
-                      ? item.chief_complaint
-                      : item.symptoms || 'No chief complaint recorded';
-
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => setActivePatient(item)}
-                      className={`p-4 rounded-xl border transition-all cursor-pointer space-y-3 ${
-                        isSelected
-                          ? 'bg-[#EAF5F2]/70 border-[#227B6B] shadow-sm ring-1 ring-[#227B6B]/20'
-                          : 'bg-[#F4FAF8]/70 hover:bg-[#EAF5F2]/50 border-[#D5E8E3]'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 min-w-0">
-                          <span className="w-10 h-10 rounded-xl bg-[#113831] text-white font-black text-xs flex items-center justify-center shrink-0">
-                            {formatTokenLabel(item.token_number, idx)}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="font-black text-sm text-[#0E2924] truncate">
-                              {getRegisteredPatientName(item)}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold bg-[#113831] text-[#A6E2D8]">
-                                <Building2 className="w-2.5 h-2.5" />
-                                {REGAL_HOSPITAL}
-                              </span>
-                              {item.doctor_name && (
-                                <span className="text-[10px] font-semibold text-[#227B6B] truncate">
-                                  {item.doctor_name}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-
-                        <span
-                          className={`px-2 py-0.5 text-[9px] font-extrabold rounded-md border uppercase tracking-wide shrink-0 ${queueStatusBadgeClass(item.status)}`}
-                        >
-                          {item.status.replace(/_/g, ' ')}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <div className="flex items-center gap-1.5 text-[#227B6B]">
-                          <Calendar className="w-3 h-3 shrink-0" />
-                          <span className="font-semibold text-[#113831]">
-                            {formatAppointmentDateLabel(item.appointment_date)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[#227B6B]">
-                          <Clock className="w-3 h-3 shrink-0" />
-                          <span className="font-semibold text-[#113831]">
-                            {item.time_slot || '—'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[#227B6B] col-span-2">
-                          <Banknote className="w-3 h-3 shrink-0" />
-                          <span className="font-semibold text-[#113831]">
-                            Consultation Fee: {formatFeeLabel(item.fee)}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-2.5 rounded-lg bg-white/80 border border-[#D5E8E3]">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#227B6B] mb-0.5">
-                          Chief Complaint
-                        </p>
-                        <p className="text-xs font-medium text-[#0E2924] line-clamp-2">{complaint}</p>
-                      </div>
-
-                      <div className="flex items-center gap-2 pt-0.5">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleStartConsultationForCard(item);
-                          }}
-                          disabled={cardActionId === item.id}
-                          className="flex-1 py-2 text-[11px] font-bold rounded-lg bg-[#113831] hover:bg-[#227B6B] text-white transition-all flex items-center justify-center gap-1 disabled:opacity-60"
-                        >
-                          {cardActionId === item.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                          )}
-                          {isInConsultation ? 'Resume Consultation' : 'Start Consultation'}
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleMarkDone(item);
-                          }}
-                          disabled={cardActionId === item.id}
-                          className="px-3 py-2 text-[11px] font-bold rounded-lg bg-[#EAF5F2] hover:bg-[#A6E2D8] text-[#113831] border border-[#A6E2D8] transition-all flex items-center justify-center gap-1 disabled:opacity-60"
-                        >
-                          {cardActionId === item.id ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          ) : (
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          )}
-                          Done
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-
-          {activeTab === 'appointments' && (
-            <div className="space-y-3 max-h-[480px] overflow-y-auto pr-0.5">
-              {filteredAppointments.length === 0 ? (
-                <div className="py-12 text-center text-[#227B6B]">
-                  <Calendar className="w-8 h-8 mx-auto text-[#A6E2D8] mb-2" />
-                  <p className="font-bold text-xs text-[#113831]">No patient bookings found</p>
-                </div>
-              ) : (
-                filteredAppointments.map((appt, idx) => (
+                return (
                   <div
-                    key={appt.id}
-                    className="p-4 bg-[#F4FAF8]/80 rounded-xl border border-[#D5E8E3] space-y-2"
+                    key={patient.id}
+                    onClick={() => handleSelectPatient(patient)}
+                    className={`p-3.5 rounded-xl border transition-all cursor-pointer shrink-0 relative ${
+                      isSelected
+                        ? 'bg-teal-50/70 border-teal-500 shadow-xs ring-1 ring-teal-500'
+                        : 'bg-white border-slate-200 hover:border-slate-300'
+                    }`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-black text-sm text-[#0E2924]">
-                          {getRegisteredPatientName(appt)}
-                        </p>
-                        <span className="text-[10px] text-[#227B6B] font-semibold">
-                          {appt.type || 'Standard Consultation'} · {appt.status.replace(/_/g, ' ')}
+                    {isSelected && (
+                      <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-teal-600 rounded-l-xl" />
+                    )}
+
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="w-8 h-8 rounded-xl bg-slate-900 text-teal-300 text-xs font-black flex items-center justify-center font-mono shrink-0">
+                          {formatToken(patient.token_number)}
                         </span>
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-slate-900 truncate">
+                            {patient.patient_name || '—'}
+                          </h4>
+                          <p className="text-[11px] text-slate-500">
+                            {patient.age ? `${patient.age} Yrs` : '—'} • {patient.gender || '—'}
+                          </p>
+                        </div>
                       </div>
-                      <span className="px-2 py-0.5 text-[9px] font-extrabold rounded-md bg-[#113831] text-[#A6E2D8]">
-                        {formatTokenLabel(appt.token_number, idx)}
+
+                      <span
+                        className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md shrink-0 ${
+                          done
+                            ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        }`}
+                      >
+                        {patient.status || 'WAITING'}
                       </span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 text-[10px] text-[#227B6B]">
-                      <span className="inline-flex items-center gap-1">
-                        <Building2 className="w-3 h-3" />
-                        {REGAL_HOSPITAL}
+
+                    <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                      <span className="truncate max-w-[140px] text-slate-600">
+                        {patient.chief_complaint || '—'}
                       </span>
-                      <span>·</span>
-                      <span>{formatAppointmentDateLabel(appt.appointment_date)}</span>
-                      <span>·</span>
-                      <span>{appt.time_slot || 'Today'}</span>
-                      <span>·</span>
-                      <span>{formatFeeLabel(appt.fee)}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {!isWaitingStatus(appt.status) &&
-                        !isInConsultationStatus(appt.status) &&
-                        appt.status !== 'COMPLETED' && (
-                          <button
-                            onClick={() => void handleAdmitFromBookings(appt)}
-                            disabled={admittingId === appt.id}
-                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-[#113831] text-white hover:bg-[#227B6B] disabled:opacity-60"
-                          >
-                            {admittingId === appt.id ? '...' : 'Admit'}
-                          </button>
-                        )}
-                      {appt.status !== 'COMPLETED' && (
-                        <>
-                          <button
-                            onClick={() => void handleStartConsultationForCard(appt)}
-                            disabled={cardActionId === appt.id}
-                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-[#227B6B] text-white hover:bg-[#113831] disabled:opacity-60"
-                          >
-                            Start
-                          </button>
-                          <button
-                            onClick={() => void handleMarkDone(appt)}
-                            disabled={cardActionId === appt.id}
-                            className="px-2.5 py-1 text-[10px] font-bold rounded-lg bg-[#EAF5F2] text-[#113831] border border-[#A6E2D8] disabled:opacity-60"
-                          >
-                            Done
-                          </button>
-                        </>
-                      )}
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {patient.appointment_time || patient.time_slot || '—'}
+                      </span>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {activeTab === 'completed' && (
-            <div className="space-y-3 max-h-[480px] overflow-y-auto pr-0.5">
-              {completedQueue.length === 0 ? (
-                <div className="py-12 text-center text-[#227B6B]">
-                  <CheckCircle2 className="w-8 h-8 mx-auto text-[#A6E2D8] mb-2" />
-                  <p className="font-bold text-xs text-[#113831]">No completed consultations yet</p>
-                  <p className="text-[11px] text-[#227B6B] mt-1">
-                    Finished encounters appear here after you click Done.
-                  </p>
-                </div>
-              ) : (
-                completedQueue.map((appt, idx) => {
-                  const complaint =
-                    appt.chief_complaint && appt.chief_complaint !== 'OPD Review'
-                      ? appt.chief_complaint
-                      : appt.symptoms || 'General consultation review';
-
-                  return (
-                    <div
-                      key={appt.id}
-                      className="p-4 rounded-xl border border-[#A6E2D8] bg-[#EAF5F2]/40 space-y-3"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 min-w-0">
-                          <span className="w-10 h-10 rounded-xl bg-[#113831] text-white font-black text-xs flex items-center justify-center shrink-0">
-                            {formatTokenLabel(appt.token_number, idx)}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="font-black text-sm text-[#0E2924] truncate">
-                              {getRegisteredPatientName(appt)}
-                            </p>
-                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[9px] font-bold bg-[#113831] text-[#A6E2D8]">
-                                <Building2 className="w-2.5 h-2.5" />
-                                {REGAL_HOSPITAL}
-                              </span>
-                              <span className="px-2 py-0.5 text-[9px] font-extrabold rounded-md border bg-[#EAF5F2] text-[#113831] border-[#A6E2D8] uppercase">
-                                Completed
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <div className="flex items-center gap-1.5 text-[#227B6B]">
-                          <Calendar className="w-3 h-3 shrink-0" />
-                          <span className="font-semibold text-[#113831]">
-                            {formatAppointmentDateLabel(appt.appointment_date)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[#227B6B]">
-                          <Clock className="w-3 h-3 shrink-0" />
-                          <span className="font-semibold text-[#113831]">
-                            {appt.time_slot || '—'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[#227B6B] col-span-2">
-                          <Banknote className="w-3 h-3 shrink-0" />
-                          <span className="font-semibold text-[#113831]">
-                            Fee: {formatFeeLabel(appt.fee)}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="p-2.5 rounded-lg bg-white/80 border border-[#D5E8E3]">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#227B6B] mb-0.5">
-                          Consultation Summary
-                        </p>
-                        <p className="text-xs font-medium text-[#0E2924] line-clamp-2">{complaint}</p>
-                        {appt.doctor_name && (
-                          <p className="text-[10px] font-semibold text-[#227B6B] mt-1">
-                            Clinician: {appt.doctor_name}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="lg:col-span-7 bg-white rounded-2xl border border-[#D5E8E3] shadow-sm p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-[#EAF5F2]">
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-[#EAF5F2] text-[#227B6B] rounded-xl">
-                <Stethoscope className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="font-bold text-[#0E2924] text-sm">Active Clinical Encounter</h2>
-                <p className="text-[11px] text-[#227B6B]">Live patient on-deck workstation</p>
-              </div>
-            </div>
-
-            <button
-              onClick={() => void handleBypass()}
-              disabled={waitingQueue.length === 0 || bypassing}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${
-                waitingQueue.length > 0 && !bypassing
-                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200/70'
-                  : 'bg-[#F4FAF8] text-[#A6C4BC] border border-[#D5E8E3] cursor-not-allowed'
-              }`}
-            >
-              {bypassing ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-600" />
-              ) : (
-                <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-              )}
-              Emergency Bypass
-            </button>
+                );
+              })
+            )}
           </div>
+        </section>
 
+        <section className="lg:col-span-6 bg-white border border-slate-200 rounded-2xl flex flex-col h-full overflow-hidden shadow-xs">
           {activePatient ? (
-            <div className="space-y-4">
-              <div className="p-4 bg-gradient-to-r from-[#0E2924] to-[#113831] rounded-xl text-white flex items-center justify-between shadow-xs">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-[#227B6B]/30 border border-[#227B6B]/40 flex items-center justify-center font-black text-[#A6E2D8] text-base">
-                    {formatTokenLabel(activePatient.token_number)}
+            <div className="flex-1 flex flex-col h-full overflow-y-auto p-4 gap-3.5">
+              {statusMessage && (
+                <div
+                  className={`p-3 rounded-xl border text-xs flex items-center gap-2 shrink-0 ${
+                    statusMessage.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50 border-rose-200 text-rose-800'
+                  }`}
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{statusMessage.text}</span>
+                </div>
+              )}
+
+              <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-center justify-between shadow-xs shrink-0">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-11 h-11 rounded-xl bg-teal-800 border border-teal-600 text-teal-200 flex items-center justify-center font-black text-sm font-mono">
+                    {formatToken(activePatient.token_number)}
                   </div>
                   <div>
-                    <h3 className="font-black text-base leading-tight">
-                      {getRegisteredPatientName(activePatient)}
-                    </h3>
-                    <p className="text-xs text-[#A6E2D8] mt-0.5">
-                      {activePatient.age || 25} Yrs • {activePatient.gender || '—'}
+                    <h2 className="text-base font-extrabold text-white">
+                      {activePatient.patient_name || '—'}
+                    </h2>
+                    <p className="text-xs text-slate-300">
+                      {activePatient.age ? `${activePatient.age} Yrs` : '—'} •{' '}
+                      {activePatient.gender || '—'} • Slot:{' '}
+                      {activePatient.appointment_time || activePatient.time_slot || '—'}
                     </p>
-                    <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[9px] font-bold bg-[#227B6B]/40 text-[#EAF5F2]">
-                      <Building2 className="w-2.5 h-2.5" />
-                      {REGAL_HOSPITAL}
-                    </span>
                   </div>
                 </div>
 
                 <div className="text-right">
-                  <span className="text-[10px] uppercase font-bold text-[#A6E2D8] block tracking-wider">
-                    Status
+                  <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                    Intake Vitals
                   </span>
-                  <span className="text-sm font-bold text-white">
-                    {activePatient.status.replace(/_/g, ' ')}
+                  <span className="text-xs font-mono font-bold text-emerald-400">
+                    {activePatient.vitals_summary || '—'}
                   </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="p-3.5 bg-[#F4FAF8]/80 rounded-xl border border-[#D5E8E3] space-y-1">
-                  <div className="flex items-center gap-1.5 text-[#227B6B]">
-                    <HeartPulse className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">
-                      Recorded Vitals
-                    </span>
-                  </div>
-                  <p className="text-xs font-semibold text-[#0E2924]">
-                    {activePatient.vitals_summary || 'Awaiting vitals capture in consultation'}
-                  </p>
-                </div>
-
-                <div className="p-3.5 bg-[#F4FAF8]/80 rounded-xl border border-[#D5E8E3] space-y-1">
-                  <div className="flex items-center gap-1.5 text-[#227B6B]">
-                    <FileText className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-bold uppercase tracking-wider">
-                      Chief Complaint
-                    </span>
-                  </div>
-                  <p className="text-xs font-semibold text-[#0E2924]">
-                    {activePatient.chief_complaint || activePatient.symptoms || 'General consultation review'}
+              <div className="bg-teal-50/70 border border-teal-200/80 rounded-xl p-3 flex items-start gap-2.5 shrink-0">
+                <FileText className="w-4 h-4 text-teal-700 mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <span className="text-[10px] font-black uppercase text-teal-900 tracking-wider block">
+                    Reported Chief Complaint
+                  </span>
+                  <p className="text-xs font-bold text-teal-950 mt-0.5">
+                    {activePatient.chief_complaint || activePatient.reason_for_visit || '—'}
                   </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-2">
-                <button
-                  onClick={handleStartConsultation}
-                  disabled={!canStartConsultation || cardActionId === activePatient.id}
-                  className={`py-3 font-bold text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 active:scale-[0.99] ${
-                    canStartConsultation
-                      ? 'bg-[#113831] hover:bg-[#227B6B] text-white'
-                      : 'bg-[#F4FAF8] text-[#A6C4BC] cursor-not-allowed'
-                  }`}
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  Start Consultation
-                </button>
-                <button
-                  onClick={() => void handleMarkDone(activePatient)}
-                  disabled={cardActionId === activePatient.id}
-                  className="w-full sm:w-auto px-6 py-3.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 font-bold text-sm rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {cardActionId === activePatient.id ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-emerald-700" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 shrink-0">
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                    Diagnosis
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Enter confirmed diagnosis..."
+                    value={diagnosis}
+                    onChange={(e) => setDiagnosis(e.target.value)}
+                    className="w-full text-xs font-bold p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-teal-600 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-black uppercase tracking-wider text-slate-600 mb-1">
+                    Examination Findings
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Clinical findings / notes..."
+                    value={clinicalNotes}
+                    onChange={(e) => setClinicalNotes(e.target.value)}
+                    className="w-full text-xs p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:bg-white focus:border-teal-600 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="bg-slate-50/80 border border-slate-200 rounded-2xl p-3 flex-1 flex flex-col min-h-[220px]">
+                <span className="text-[11px] font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5 mb-2 shrink-0">
+                  <Pill className="w-3.5 h-3.5 text-teal-700" />
+                  Prescription Pad ({medications.length} Prescribed)
+                </span>
+
+                <form onSubmit={handleAddMedication} className="flex flex-wrap items-center gap-2 mb-2.5 shrink-0">
+                  <input
+                    type="text"
+                    placeholder="Enter medicine name..."
+                    value={drugInput}
+                    onChange={(e) => setDrugInput(e.target.value)}
+                    className="flex-1 min-w-[140px] text-xs p-2 bg-white border border-slate-200 rounded-xl outline-none"
+                  />
+                  <select
+                    value={dosageInput}
+                    onChange={(e) => setDosageInput(e.target.value)}
+                    className="text-xs p-2 bg-white border border-slate-200 rounded-xl"
+                  >
+                    <option value="1-0-1">1-0-1 (BID)</option>
+                    <option value="1-1-1">1-1-1 (TID)</option>
+                    <option value="1-0-0">1-0-0 (Morning)</option>
+                    <option value="0-0-1">0-0-1 (Night)</option>
+                    <option value="STAT">1 STAT (Immediate)</option>
+                  </select>
+                  <select
+                    value={durationInput}
+                    onChange={(e) => setDurationInput(e.target.value)}
+                    className="text-xs p-2 bg-white border border-slate-200 rounded-xl"
+                  >
+                    <option value="3 Days">3 Days</option>
+                    <option value="5 Days">5 Days</option>
+                    <option value="7 Days">7 Days</option>
+                    <option value="15 Days">15 Days</option>
+                    <option value="30 Days">30 Days</option>
+                  </select>
+                  <button
+                    type="submit"
+                    className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add
+                  </button>
+                </form>
+
+                <div className="flex-1 overflow-y-auto max-h-[140px] flex flex-col gap-1.5 pr-1">
+                  {medications.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-slate-400 italic">
+                      No drugs added yet. Type medication above.
+                    </div>
                   ) : (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                    medications.map((med, i) => (
+                      <div
+                        key={i}
+                        className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center justify-between text-xs shrink-0"
+                      >
+                        <span className="font-bold text-slate-900">{med.name}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="bg-teal-50 text-teal-800 border border-teal-200 px-2 py-0.5 rounded font-mono text-[10px] font-bold">
+                            {med.dosage}
+                          </span>
+                          <span className="text-slate-600 text-[11px]">{med.duration}</span>
+                          <button
+                            type="button"
+                            onClick={() => setMedications((prev) => prev.filter((_, idx) => idx !== i))}
+                            className="text-rose-500 hover:text-rose-700 ml-1 cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))
                   )}
-                  Done
-                </button>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Doctor's Instructions / Dietary Advice..."
+                  value={doctorAdvice}
+                  onChange={(e) => setDoctorAdvice(e.target.value)}
+                  className="mt-2.5 w-full text-xs p-2 bg-white border border-slate-200 rounded-xl text-slate-800 outline-none shrink-0"
+                />
               </div>
+
+              <button
+                type="button"
+                disabled={isFinalizing}
+                onClick={handleDoneAndDispatch}
+                className="w-full py-4 bg-teal-800 hover:bg-teal-900 active:bg-teal-950 text-white font-black text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer shrink-0 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-5 h-5 text-emerald-300" />
+                {isFinalizing ? 'DISPATCHING TO PATIENT APP...' : '✓ DONE & DISPATCH DIGITAL PRESCRIPTION'}
+              </button>
             </div>
           ) : (
-            <div className="p-8 rounded-2xl bg-gradient-to-br from-[#F4FAF8]/80 via-white to-[#EAF5F2]/30 border border-[#D5E8E3] flex flex-col items-center justify-center text-center space-y-4">
-              <div className="w-14 h-14 rounded-2xl bg-[#EAF5F2]/80 border border-[#A6E2D8] flex items-center justify-center text-[#227B6B] shadow-sm">
-                <Stethoscope className="w-7 h-7 animate-pulse" />
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mb-3">
+                <User className="w-7 h-7" />
               </div>
-
-              <div className="space-y-1">
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#EAF5F2] text-[#227B6B] border border-[#A6E2D8] text-[11px] font-bold">
-                  <span className="w-2 h-2 rounded-full bg-[#227B6B] animate-pulse" />
-                  Live Clinical Standby
-                </div>
-                <p className="text-[11px] text-[#227B6B] font-semibold mt-2 animate-pulse">
-                  Waiting for check-in from Patient App or Front Desk
-                </p>
-                <h3 className="font-black text-[#0E2924] text-base mt-2">
-                  No Active Encounter On-Deck
-                </h3>
-                <p className="text-xs text-[#227B6B] max-w-sm mx-auto">
-                  Select a patient from the queue, admit a scheduled appointment, or click
-                  &quot;Call Next&quot; when a patient checks in.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                <button
-                  onClick={() => void handleCallNext()}
-                  disabled={waitingQueue.length === 0 || callingNext}
-                  className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center gap-1.5 ${
-                    waitingQueue.length > 0 && !callingNext
-                      ? 'bg-[#113831] text-white hover:bg-[#227B6B] shadow-sm'
-                      : 'bg-[#F4FAF8] text-[#A6C4BC] border border-[#D5E8E3] cursor-not-allowed'
-                  }`}
-                >
-                  {callingNext ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <UserCheck className="w-3.5 h-3.5" />
-                  )}
-                  Call Next in Line
-                </button>
-
-                {nextUpcoming && (
-                  <button
-                    onClick={() => void handleAdmitFromBookings(nextUpcoming)}
-                    disabled={admittingId === nextUpcoming.id}
-                    className="px-4 py-2.5 rounded-xl font-bold text-xs bg-[#227B6B] hover:bg-[#113831] text-white shadow-sm transition-all flex items-center gap-1.5 disabled:opacity-60"
-                  >
-                    {admittingId === nextUpcoming.id ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Plus className="w-3.5 h-3.5" />
-                    )}
-                    Admit from Bookings
-                  </button>
-                )}
-
-                <button
-                  onClick={() => void handleQuickWalkIn()}
-                  disabled={walkInLoading}
-                  className="px-4 py-2.5 rounded-xl font-bold text-xs border border-[#A6E2D8] bg-[#EAF5F2] text-[#113831] hover:bg-[#A6E2D8] transition-all flex items-center gap-1.5 disabled:opacity-60"
-                >
-                  {walkInLoading ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Plus className="w-3.5 h-3.5" />
-                  )}
-                  Quick Walk-In Intake
-                </button>
-              </div>
+              <h3 className="font-bold text-slate-700 text-sm">No Patient Selected</h3>
+              <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                Select an appointment from Section 1 to begin encounter.
+              </p>
             </div>
           )}
-        </div>
-      </div>
+        </section>
 
-      {emergencyArchive.length > 0 && (
-        <div className="rounded-2xl border border-[#D5E8E3] bg-white shadow-sm overflow-hidden">
-          <div className="border-b border-[#D5E8E3] bg-[#F4FAF8] px-5 py-4">
-            <h2 className="text-sm font-black text-[#0E2924] flex items-center gap-2">
-              <Activity className="h-4 w-4 text-[#227B6B]" />
-              Emergency SOS Archive
-            </h2>
-            <p className="mt-0.5 text-[11px] font-semibold text-[#227B6B]">
-              Completed and stabilized bypass cases with clinical documentation
-            </p>
+        <section className="lg:col-span-3 bg-white border border-slate-200 rounded-2xl flex flex-col h-full overflow-hidden shadow-xs">
+          <div className="p-3.5 border-b border-slate-100 bg-slate-50/60 flex items-center justify-between shrink-0">
+            <span className="text-xs font-black tracking-wider uppercase text-slate-600">3. Records & SOS</span>
+            <div className="flex bg-slate-200/80 p-0.5 rounded-xl text-[11px] font-bold">
+              <button
+                type="button"
+                onClick={() => setRightTab('history')}
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  rightTab === 'history' ? 'bg-white text-teal-900 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                360 History
+              </button>
+              <button
+                type="button"
+                onClick={() => setRightTab('emergency')}
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                  rightTab === 'emergency' ? 'bg-white text-rose-800 shadow-xs' : 'text-slate-600'
+                }`}
+              >
+                SOS Archive
+              </button>
+            </div>
           </div>
-          <ul className="divide-y divide-[#EAF5F2] max-h-64 overflow-y-auto">
-            {emergencyArchive.map((record) => (
-              <li key={record.id} className="px-5 py-3 text-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-bold text-[#0E2924]">{record.patient_name}</span>
-                  <span className="rounded-md bg-[#EAF5F2] px-2 py-0.5 text-[10px] font-bold uppercase text-[#227B6B]">
-                    {record.status}
-                  </span>
-                </div>
-                <p className="mt-1 text-[#227B6B]">{record.chief_complaint}</p>
-                {record.doctor_prescription_notes && (
-                  <p className="mt-1 text-[11px] text-slate-500 whitespace-pre-line">
-                    {record.doctor_prescription_notes}
+
+          <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2.5 min-h-0">
+            {rightTab === 'history' ? (
+              patientHistory.length === 0 ? (
+                <div className="text-center py-16 text-xs text-slate-400">No prior consultation records.</div>
+              ) : (
+                patientHistory.map((item, idx) => (
+                  <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs shrink-0">
+                    <div className="flex items-center justify-between text-[10px] font-bold mb-1.5">
+                      <span className="text-teal-800 uppercase font-black">{item.type}</span>
+                      <span className="text-slate-500">
+                        {new Date(item.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    {item.diagnosis && (
+                      <p className="font-extrabold text-slate-900 text-xs mb-1">{item.diagnosis}</p>
+                    )}
+                    {item.clinical_notes && (
+                      <p className="text-slate-600 text-[11px] leading-relaxed mb-1.5">{item.clinical_notes}</p>
+                    )}
+                    {item.medications && Array.isArray(item.medications) && (
+                      <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-800">
+                        <span className="font-bold text-teal-800">Rx: </span>
+                        {item.medications.map((m) => m.name).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )
+            ) : emergencyArchive.length === 0 ? (
+              <div className="text-center py-16 text-xs text-slate-400">No emergency records logged.</div>
+            ) : (
+              emergencyArchive.map((emg, idx) => (
+                <div key={idx} className="p-3 bg-rose-50/70 border border-rose-200 rounded-xl text-xs shrink-0">
+                  <div className="flex items-center justify-between text-[10px] font-black mb-1">
+                    <span className="text-rose-800">BED {emg.bed_number || '—'}</span>
+                    <span className="text-slate-500">
+                      {new Date(emg.admitted_at).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  </div>
+                  <h5 className="font-bold text-slate-900 text-xs">{emg.patient_name}</h5>
+                  <p className="text-slate-600 text-[11px] mt-0.5">
+                    {emg.chief_complaint || emg.reason_for_visit || '—'}
                   </p>
-                )}
-                <p className="mt-1 text-[10px] text-slate-400">
-                  Completed {record.completed_at ? new Date(record.completed_at).toLocaleString() : '—'}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

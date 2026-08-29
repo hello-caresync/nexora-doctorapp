@@ -418,3 +418,51 @@ textarea:-webkit-autofill:active {
       -3px -3px 8px rgb(255 255 255 / 65%);
   }
 }
+
+@keyframes auth-aurora-drift {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+
+  33% {
+    transform: translate(28px, -18px) scale(1.04);
+  }
+
+  66% {
+    transform: translate(-22px, 24px) scale(0.96);
+  }
+}
+
+@keyframes auth-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-auth-aurora {
+  animation: auth-aurora-drift 14s ease-in-out infinite;
+}
+
+.animate-auth-shimmer {
+  animation: auth-shimmer 2.5s ease-in-out infinite;
+}
+
+@keyframes auth-float {
+  0%,
+  100% {
+    transform: translateY(0) translateX(0);
+  }
+
+  50% {
+    transform: translateY(-14px) translateX(6px);
+  }
+}
+
+.animate-auth-float {
+  animation: auth-float 5s ease-in-out infinite;
+}

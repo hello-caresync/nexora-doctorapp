@@ -1,8 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
+import { LogOut } from 'lucide-react';
 
+import { clearAdminSession } from '@/lib/admin/auth';
 import { ui } from '@/components/nexora-hospital/ui/primitives';
 import { HOSPITAL_NAV, hospitalModuleFromPath } from '@/lib/nexora-hospital/navigation';
 
@@ -13,7 +15,14 @@ type HospitalSidebarProps = {
 
 export function HospitalSidebar({ mobile, onNavigate }: HospitalSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const active = hospitalModuleFromPath(pathname);
+
+  const handleLogout = () => {
+    clearAdminSession();
+    router.replace('/login');
+    onNavigate?.();
+  };
 
   return (
     <aside
@@ -26,8 +35,8 @@ export function HospitalSidebar({ mobile, onNavigate }: HospitalSidebarProps) {
     >
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className={ui.sidebarBrand}>
-          <p className={ui.sidebarBrandTitle}>🏥 Nexora Hospital</p>
-          <p className={ui.sidebarBrandSub}>Operations Hub V0</p>
+          <p className={ui.sidebarBrandTitle}>REGAL HOSPITAL</p>
+          <p className={ui.sidebarBrandSub}>Hospital Operations · RH-BLR-01</p>
         </div>
         <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {HOSPITAL_NAV.map((item) => {
@@ -48,6 +57,17 @@ export function HospitalSidebar({ mobile, onNavigate }: HospitalSidebarProps) {
             );
           })}
         </nav>
+      </div>
+
+      <div className="border-t border-white/10 p-3">
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+        >
+          <LogOut className="h-4 w-4" aria-hidden="true" />
+          Logout
+        </button>
       </div>
     </aside>
   );
