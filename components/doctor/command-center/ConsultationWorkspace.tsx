@@ -36,12 +36,23 @@ const emptyItem = (): PrescriptionItem => ({
 export function ConsultationWorkspace({ appointmentId }: { appointmentId: string }) {
   const router = useRouter();
   const session = getDoctorSession();
-  const { data: ctx } = useDoctorContext(session.employeeId);
+  const employeeId =
+    session?.employeeId ||
+    (session as any)?.doctorId ||
+    (session as any)?.doctor_id ||
+    'RH-D01';
+  const doctorName =
+    session?.fullName ||
+    (session as any)?.doctorName ||
+    (session as any)?.doctor_name ||
+    'Doctor';
+
+  const { data: ctx } = useDoctorContext(employeeId);
   const doctorUuid = ctx?.doctorUuid ?? '';
 
   const { data: tokens = [] } = useDoctorQueue({
-    employeeId: session.employeeId,
-    doctorName: session.fullName || session.doctor_name,
+    employeeId,
+    doctorName,
     doctorUuid,
   });
   const token =
@@ -105,7 +116,7 @@ export function ConsultationWorkspace({ appointmentId }: { appointmentId: string
       consultationId: cid,
       patientId: token.patient_id,
       doctorId: doctorUuid,
-      doctorName: session.fullName || session.doctor_name,
+      doctorName,
       chiefComplaint,
       symptoms,
       clinicalExamination: clinicalExam,
