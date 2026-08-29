@@ -196,7 +196,7 @@ function AppointmentRow({
   onCancel: () => void;
 }) {
   return (
-    <tr className={ui.trHover}>
+    <tr className={(ui as any).trHover || 'border-b border-slate-100 hover:bg-slate-50/80 transition-colors'}>
       <td className={ui.td}>{formatTime(a.time)}</td>
       <td className={ui.td}>
         <p className="font-medium">{a.patientName}</p>
