@@ -356,7 +356,12 @@ export async function updateDoctorProfile(
 ) {
   if (input.specialization) mockProfile.specialization = input.specialization;
   if (input.consultationFees !== undefined) mockProfile.consultationFees = input.consultationFees;
-  if (input.workingHoursJson) mockProfile.workingHours = input.workingHoursJson;
+  if (input.workingHoursJson) {
+    mockProfile.workingHours = {
+      ...mockProfile.workingHours,
+      ...(input.workingHoursJson as any),
+    };
+  }
   await writeAuditLog({ session, entityType: 'doctor', entityId: session.doctorId, action: 'UPDATE_PROFILE' });
   return getDoctorProfile(session);
 }
