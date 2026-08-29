@@ -60,14 +60,22 @@ export type HospitalMemberRow = {
 export interface HospitalDetailsInput {
   hospitalName: string;
   registrationNumber: string;
-  phone?: string;
+  taxGstinId: string;
+  officialEmail: string;
+  emergencyHelpline: string;
+  phone: string;
+  address: string;
+  city: string;
+  state: string;
+  pincode: string;
+  totalBeds: number;
+  icuBeds: number;
+  opdRooms: number;
+  otSuites: number;
   email?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  pincode?: string;
   facilityType?: string;
-  totalBeds?: number;
+  generalBeds?: number;
+  directorName?: string;
   [key: string]: any;
 }
 

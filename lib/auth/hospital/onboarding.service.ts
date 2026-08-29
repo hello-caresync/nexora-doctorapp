@@ -6,24 +6,9 @@ import {
   assignedAppForRole,
 } from './member-types';
 import { generateSecurePassword, hashPassword } from './password-utils';
-import { setStoredActiveHospitalId } from '@/lib/hospital/hospital-members.service';
+import { setStoredActiveHospitalId, type HospitalDetailsInput } from '@/lib/hospital/hospital-members.service';
 
-export type HospitalDetailsInput = {
-  hospitalName: string;
-  registrationNumber: string;
-  taxGstinId: string;
-  officialEmail: string;
-  phone: string;
-  emergencyHelpline: string;
-  address: string;
-  city: string;
-  state: string;
-  pincode: string;
-  totalBeds: number;
-  icuBeds: number;
-  opdRooms: number;
-  otSuites: number;
-};
+export type { HospitalDetailsInput };
 
 export type OnboardingSaveResult =
   | {
