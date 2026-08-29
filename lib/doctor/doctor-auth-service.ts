@@ -47,7 +47,7 @@ export async function loadDoctorProfiles(): Promise<DoctorProfileRow[]> {
       .order('id', { ascending: true });
 
     if (error || !data?.length) return [];
-    return data.map((row) => mapProfile(row as Record<string, unknown>));
+    return (data as any[]).map((row: any) => mapProfile(row as Record<string, unknown>));
   } catch {
     return [];
   }
