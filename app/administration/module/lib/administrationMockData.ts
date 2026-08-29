@@ -316,16 +316,41 @@ export const PATIENT_LOAD_FORECAST = [
   { day: 'Sun', opd: 290, er: 15, ipd: 298 },
 ];
 
-export { formatINR as formatInr } from '@/lib/utils/currency';
+/**
+ * Format currency values according to Indian Rupee (INR) locale standards
+ */
+export function formatInr(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(amount);
+}
 
+/**
+ * Compact currency formatter for high-value metric cards (Lakhs & Crores)
+ */
 export function formatInrCr(amount: number): string {
   if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
   if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)} L`;
   return formatInr(amount);
 }
 
+export function formatInrCompact(amount: number): string {
+  if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(2)} Cr`;
+  if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)} L`;
+  return formatInr(amount);
+}
+
 export function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+  try {
+    return new Date(iso).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
 }
 
 export function searchAdministration(query: string): number {
