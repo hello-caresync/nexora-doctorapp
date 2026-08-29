@@ -162,7 +162,9 @@ export function ConsultationWorkspace() {
               spo2: d.vitals?.spo2 ?? '',
               ...d.vitals,
               [field]: value,
+              recordedAt: d.vitals?.recordedAt || new Date().toISOString(),
             },
+            updatedAt: new Date().toISOString(),
           }
         : d,
     );
