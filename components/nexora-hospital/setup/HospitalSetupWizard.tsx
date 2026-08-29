@@ -22,6 +22,15 @@ const STEPS = [
 ] as const;
 
 const STAFF_ROLES = ['Admin', 'Receptionist', 'Nurse', 'Billing', 'Pharmacist', 'Lab Tech'] as const;
+
+export type StaffRole =
+  | 'Admin'
+  | 'Nurse'
+  | 'Pharmacist'
+  | 'Receptionist'
+  | 'Lab Tech'
+  | 'Billing'
+  | string;
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
 const PAYMENT_METHODS = ['Cash', 'Card', 'UPI', 'Insurance'] as const;
 
@@ -340,12 +349,16 @@ function StaffStep({
   staff: SetupWizardDraft['staff'];
   onChange: (s: SetupWizardDraft['staff']) => void;
 }) {
-  const [form, setForm] = useState({ fullName: '', role: STAFF_ROLES[0], email: '' });
+  const [form, setForm] = useState<{
+    fullName: string;
+    role: StaffRole;
+    email: string;
+  }>({ fullName: '', role: STAFF_ROLES[0], email: '' });
   return (
     <div>
       <div className="grid gap-3 sm:grid-cols-3">
         <input className={ui.input} placeholder="Full name" value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} />
-        <select className={ui.select} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as typeof STAFF_ROLES[number] })}>
+        <select className={ui.select} value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
           {STAFF_ROLES.map((r) => (
             <option key={r} value={r}>{r}</option>
           ))}
