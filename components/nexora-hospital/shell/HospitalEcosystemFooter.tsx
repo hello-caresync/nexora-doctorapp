@@ -10,9 +10,9 @@ export function HospitalEcosystemFooter() {
     <footer
       className="sticky bottom-0 z-20 border-t px-4 py-2.5 text-center text-sm font-medium backdrop-blur"
       style={{
-        borderColor: `${HOSPITAL_COLORS.foam}99`,
+        borderColor: HOSPITAL_COLORS.cardBorder || '#B2EBF2',
         backgroundColor: 'rgba(255,255,255,0.95)',
-        color: HOSPITAL_COLORS.textMuted,
+        color: (HOSPITAL_COLORS as any).textMuted || '#64748b',
       }}
     >
       <span className="font-bold text-[#1B5E3A]">Nexora Healthcare Ecosystem V0</span>
