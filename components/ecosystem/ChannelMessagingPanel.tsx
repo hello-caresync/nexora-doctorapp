@@ -63,7 +63,7 @@ export function ChannelMessagingPanel({
 
   return (
     <section className={`${msgClasses.card} flex ${heightClass} flex-col overflow-hidden`}>
-      <div className={`${msgClasses.header} flex flex-wrap items-start justify-between gap-3`}>
+      <div className={`${(msgClasses as any).header || 'p-4 border-b border-slate-100 bg-white'} flex flex-wrap items-start justify-between gap-3`}>
         <div className="min-w-0">
           <h2 className="text-sm font-black text-slate-900">{title}</h2>
           {subtitle ? <p className="mt-0.5 text-xs font-medium text-slate-500">{subtitle}</p> : null}
