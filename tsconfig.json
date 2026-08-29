@@ -38,6 +38,8 @@
   "exclude": [
     "node_modules",
     "nexora-backend",
-    "nexora-backend/**/*"
+    "nexora-backend/**/*",
+    "prisma",
+    "prisma/**/*"
   ]
 }
