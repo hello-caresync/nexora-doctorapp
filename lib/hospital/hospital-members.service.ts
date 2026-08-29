@@ -57,6 +57,20 @@ export type HospitalMemberRow = {
   departments?: { name: string } | { name: string }[] | null;
 };
 
+export interface HospitalDetailsInput {
+  hospitalName: string;
+  registrationNumber: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  facilityType?: string;
+  totalBeds?: number;
+  [key: string]: any;
+}
+
 export type HospitalDoctorOption = {
   id: string;
   employeeId: string;
