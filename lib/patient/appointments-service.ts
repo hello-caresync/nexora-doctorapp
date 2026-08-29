@@ -115,12 +115,17 @@ async function enrichQueuePositions(
         .in('status', ['ISSUED', 'CALLED'])
         .lt('sequence_number', row.sequence_number);
 
-      row.queue_position = (count ?? 0) + 1;
+      const queuePos = (count ?? 0) + 1;
+      row.queue_position = queuePos;
       if (!row.estimated_wait_minutes) {
-        row.estimated_wait_minutes = Math.max(5, (row.queue_position - 1) * 12);
+        row.estimated_wait_minutes = Math.max(5, (queuePos - 1) * 12);
       }
     } catch {
-      row.queue_position = row.sequence_number;
+      const fallbackPos = Number(row.sequence_number ?? 1);
+      row.queue_position = fallbackPos;
+      if (!row.estimated_wait_minutes) {
+        row.estimated_wait_minutes = Math.max(5, (fallbackPos - 1) * 12);
+      }
     }
   }
 
