@@ -121,7 +121,7 @@ function mapInvoiceRow(row: Record<string, unknown>): BillingInvoice {
     paidAmount: paid,
     paymentStatus: (row.payment_status as BillingInvoice['paymentStatus']) ?? (paid >= total ? 'Paid' : paid > 0 ? 'Partial' : 'Unpaid'),
     lineItems,
-    invoiceNumber: String(row.invoice_number ?? row.id.slice(0, 8)),
+    invoiceNumber: String(row.invoice_number ?? String(row.id ?? '').slice(0, 8)),
     createdAt: String(row.created_at ?? new Date().toISOString()),
   };
 }
