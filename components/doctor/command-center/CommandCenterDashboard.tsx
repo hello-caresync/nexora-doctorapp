@@ -224,9 +224,9 @@ export function CommandCenterDashboard(props: CommandCenterDashboardProps) {
                   <p className="text-xs font-black text-[#173F5F]">
                     #{tokenNum} · {patientName}
                   </p>
-                  {wait != null && (
+                  {wait !== null && wait !== undefined && (
                     <p className="text-[10px] font-semibold text-[#5A7A94]">
-                      ~{wait} min wait
+                      ~{typeof wait === 'object' ? JSON.stringify(wait) : String(wait)} min wait
                     </p>
                   )}
                 </div>
