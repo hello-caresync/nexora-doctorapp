@@ -7,41 +7,95 @@ export interface DoctorSession {
   hospitalCode?: string;
   portalRoute?: string;
   loggedInAt?: string;
+  /** Profile portal aliases (historical session shape) */
+  employeeId?: string;
+  fullName?: string;
+  doctor_name?: string;
+  consultationFee?: number;
+  opdRoom?: string;
+  fee?: number;
+  qualification?: string;
 }
 
 const SESSION_KEY = 'active_doctor_session';
 
+export const DOCTOR_SESSION_CHANGED_EVENT = 'curasync:doctor-session-changed';
+
+function dispatchSessionChanged(session: DoctorSession | null): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(DOCTOR_SESSION_CHANGED_EVENT, { detail: session }));
+}
+
+function normalizeStoredSession(parsed: Partial<DoctorSession>): DoctorSession | null {
+  const doctorId = parsed.doctorId ?? parsed.employeeId;
+  const doctorName = parsed.doctorName ?? parsed.fullName ?? parsed.doctor_name;
+
+  if (!doctorId || !doctorName) return null;
+
+  return {
+    ...parsed,
+    doctorId,
+    doctorName,
+    employeeId: parsed.employeeId ?? doctorId,
+    fullName: parsed.fullName ?? doctorName,
+  };
+}
+
 export function getDoctorSession(): DoctorSession | null {
   if (typeof window === 'undefined') return null;
 
-  const raw =
-    sessionStorage.getItem(SESSION_KEY) || localStorage.getItem(SESSION_KEY);
+  const raw = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
   if (!raw) return null;
 
   try {
-    const parsed = JSON.parse(raw) as DoctorSession;
-    if (!parsed?.doctorId || !parsed?.doctorName) return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as Partial<DoctorSession>;
+    return normalizeStoredSession(parsed);
   } catch {
     return null;
   }
 }
 
+/** Persist session to both localStorage and sessionStorage. */
+export function setDoctorSession(session: DoctorSession): void {
+  if (typeof window === 'undefined') return;
+
+  const normalized = normalizeStoredSession(session) ?? session;
+  const payload = JSON.stringify(normalized);
+  localStorage.setItem(SESSION_KEY, payload);
+  sessionStorage.setItem(SESSION_KEY, payload);
+  dispatchSessionChanged(normalized);
+}
+
+/** Login helper — optionally skip persisting to localStorage when "Remember me" is off. */
 export function saveDoctorSession(session: DoctorSession, remember = true): void {
-  const payload = { ...session, loggedInAt: new Date().toISOString() };
+  if (typeof window === 'undefined') return;
+
+  const payload = normalizeStoredSession({ ...session, loggedInAt: new Date().toISOString() }) ?? {
+    ...session,
+    loggedInAt: new Date().toISOString(),
+  };
   const serialized = JSON.stringify(payload);
   sessionStorage.setItem(SESSION_KEY, serialized);
+
   if (remember) {
     localStorage.setItem(SESSION_KEY, serialized);
   } else {
     localStorage.removeItem(SESSION_KEY);
   }
+
+  dispatchSessionChanged(payload);
 }
 
 export function clearDoctorSession(): void {
+  if (typeof window === 'undefined') return;
+
   localStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(SESSION_KEY);
+  dispatchSessionChanged(null);
 }
+
+/** Alias used by doctor shell and workspace components. */
+export const getActiveDoctorSession = getDoctorSession;
 
 function normalizeDoctorName(name: string): string {
   return name
@@ -70,15 +124,16 @@ export function appointmentBelongsToDoctor(
   item: Record<string, unknown>,
   session: DoctorSession,
 ): boolean {
-  const sessionId = session.doctorId.trim().toUpperCase();
+  const sessionId = (session.doctorId || session.employeeId || '').trim().toUpperCase();
   const itemDocId = extractAppointmentDoctorCode(item);
 
   if (itemDocId && sessionId && itemDocId === sessionId) {
     return true;
   }
 
+  const sessionDisplayName = session.doctorName || session.fullName || session.doctor_name || '';
   const itemName = normalizeDoctorName(String(item.doctor_name || ''));
-  const sessionName = normalizeDoctorName(session.doctorName);
+  const sessionName = normalizeDoctorName(sessionDisplayName);
 
   if (!itemName || !sessionName) return false;
 

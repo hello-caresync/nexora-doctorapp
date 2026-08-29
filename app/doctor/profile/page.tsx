@@ -136,9 +136,9 @@ async function upsertDoctorRow(payload: Record<string, unknown>) {
 
 function fromSession(session: DoctorSession): DoctorProfile {
   return {
-    employeeId: session.employeeId,
-    fullName: session.fullName,
-    department: session.department,
+    employeeId: session.employeeId ?? session.doctorId ?? '',
+    fullName: session.fullName ?? session.doctorName ?? '',
+    department: session.department ?? '',
     departmentId: null,
     medicalLicenseNumber: '',
     specialization: '',
@@ -152,8 +152,10 @@ function fromSession(session: DoctorSession): DoctorProfile {
 }
 
 export default function DoctorProfilePage() {
-  const [session] = useState(getDoctorSession);
-  const [profile, setProfile] = useState<DoctorProfile>(() => fromSession(session));
+  const [session] = useState(() => getDoctorSession());
+  const [profile, setProfile] = useState<DoctorProfile>(() =>
+    fromSession(session ?? { doctorId: '', doctorName: '' }),
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [offline, setOffline] = useState(false);
@@ -161,14 +163,16 @@ export default function DoctorProfilePage() {
   const [signature, setSignature] = useState<DigitalSignature>(emptySignature);
 
   const loadProfile = useCallback(async () => {
+    if (!session) return;
     setLoading(true);
     try {
+      const employeeId = session.employeeId ?? session.doctorId ?? '';
       const { data, error } = await supabase
         .from('hospital_members')
         .select(
           'employee_id, first_name, last_name, email, phone, department_id, medical_license_number, specialization, qualification, experience_years, consultation_fee, opd_room_number, departments(name)',
         )
-        .eq('employee_id', session.employeeId)
+        .eq('employee_id', employeeId)
         .maybeSingle();
       if (error) throw error;
       if (!data) {
@@ -183,8 +187,8 @@ export default function DoctorProfilePage() {
         employeeId: member.employee_id,
         fullName: rawName
           ? `Dr. ${rawName}`.replace(/^Dr\.\s*Dr\.?\s*/i, 'Dr. ')
-          : session.fullName,
-        department: departmentName(member.departments, session.department),
+          : session.fullName ?? session.doctorName ?? '',
+        department: departmentName(member.departments, session.department ?? ''),
         departmentId: member.department_id,
         medicalLicenseNumber: member.medical_license_number ?? '',
         specialization: member.specialization ?? '',
@@ -270,10 +274,13 @@ export default function DoctorProfilePage() {
 
   const saveProfile = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!session) return;
     setSaving(true);
     writeSignature(signature);
     const nextSession: DoctorSession = {
       ...session,
+      doctorId: session.doctorId ?? profile.employeeId,
+      doctorName: session.doctorName ?? profile.fullName,
       employeeId: profile.employeeId,
       fullName: profile.fullName,
       doctor_name: profile.fullName,
@@ -405,6 +412,14 @@ export default function DoctorProfilePage() {
 
   const inputClass =
     'w-full rounded-2xl border border-white/80 bg-white/70 px-3 py-2.5 text-sm shadow-inner outline-none backdrop-blur transition focus:border-[#894A66] focus:ring-2 focus:ring-[#894A66]/15';
+
+  if (!session) {
+    return (
+      <section className="flex min-h-full items-center justify-center p-8 text-sm text-[#894A66]">
+        No active doctor session. Please sign in again.
+      </section>
+    );
+  }
 
   return (
     <section className="min-h-full bg-[radial-gradient(circle_at_top_left,_#BDE2F5_0,_#F2F6FA_40%,_#F2F6FA_100%)] p-4 text-[#2C243B] sm:p-6 lg:p-8">
