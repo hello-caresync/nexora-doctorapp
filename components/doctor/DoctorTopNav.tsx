@@ -47,7 +47,7 @@ export function DoctorTopNav({ session, onOpenMenu, onLogout }: DoctorTopNavProp
                 Active Consultation Room {session.opdRoom ?? '104'}
               </span>
             </div>
-            <p className="truncate text-xs font-bold text-[#9887B1]">{session.department}</p>
+            <p className="truncate text-xs font-bold text-[#9887B1]">{session.department ?? 'Clinical'}</p>
           </div>
         </div>
 

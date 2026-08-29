@@ -1,4 +1,4 @@
-import { getDoctorSession, type DoctorSession } from '@/lib/doctor/session';
+import { getDoctorSession, resolveDoctorSessionIdentity, type DoctorSession } from '@/lib/doctor/session';
 import { supabase } from '@/lib/supabaseClient';
 import { resolveDoctorIdFromDb } from './supabase-service';
 
@@ -88,15 +88,15 @@ function writeUuidMap(map: Record<string, string>) {
 
 /** Resolve session clinician → Supabase `doctor_id` UUID */
 export async function resolveDoctorContext(
-  session: DoctorSession = getDoctorSession(),
+  sessionInput: DoctorSession | null = getDoctorSession(),
 ): Promise<DoctorContext> {
-  const employeeId = session.employeeId;
-  const fullName = session.fullName || session.doctor_name;
+  const identity = resolveDoctorSessionIdentity(sessionInput);
+  const { employeeId, fullName, department, email, specialization } = identity;
 
   let doctorUuid: string | null = null;
 
   try {
-    doctorUuid = await resolveDoctorIdFromDb(employeeId, fullName, session.email);
+    doctorUuid = await resolveDoctorIdFromDb(employeeId, fullName, email);
   } catch {
     /* fall through */
   }
@@ -113,9 +113,9 @@ export async function resolveDoctorContext(
             doctor_id: doctorUuid,
             doctor_code: employeeId,
             full_name: fullName,
-            email: session.email || `${employeeId.toLowerCase()}@regal.local`,
-            specialization: session.specialization || session.department,
-            department: session.department,
+            email: email || `${employeeId.toLowerCase()}@regal.local`,
+            specialization: specialization || department,
+            department,
             registration_number: employeeId,
             is_notifications_enabled: true,
           },
@@ -135,8 +135,8 @@ export async function resolveDoctorContext(
     doctorUuid,
     employeeId,
     fullName,
-    department: session.department,
-    email: session.email,
+    department,
+    email,
     isNotificationsEnabled: true,
   };
 }

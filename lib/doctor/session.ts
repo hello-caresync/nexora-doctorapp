@@ -19,6 +19,43 @@ export interface DoctorSession {
 
 const SESSION_KEY = 'active_doctor_session';
 
+export const DEFAULT_DOCTOR_EMPLOYEE_ID = 'RH-D01';
+export const DEFAULT_DOCTOR_DISPLAY_NAME = 'Dr. Suriraju V';
+export const DEFAULT_DOCTOR_DEPARTMENT = 'Clinical';
+
+export type ResolvedDoctorSession = {
+  employeeId: string;
+  doctorId: string;
+  fullName: string;
+  doctorName: string;
+  department: string;
+  email?: string;
+  specialization?: string;
+};
+
+/** Safe fallbacks when `getDoctorSession()` returns null or partial profile fields. */
+export function resolveDoctorSessionIdentity(
+  session: DoctorSession | null = getDoctorSession(),
+): ResolvedDoctorSession {
+  const employeeId = session?.employeeId || session?.doctorId || DEFAULT_DOCTOR_EMPLOYEE_ID;
+  const fullName =
+    session?.fullName ||
+    session?.doctorName ||
+    session?.doctor_name ||
+    DEFAULT_DOCTOR_DISPLAY_NAME;
+  const doctorName = session?.doctorName || fullName;
+
+  return {
+    employeeId,
+    doctorId: session?.doctorId || employeeId,
+    fullName,
+    doctorName,
+    department: session?.department || DEFAULT_DOCTOR_DEPARTMENT,
+    email: session?.email,
+    specialization: session?.specialization,
+  };
+}
+
 export const DOCTOR_SESSION_CHANGED_EVENT = 'curasync:doctor-session-changed';
 
 function dispatchSessionChanged(session: DoctorSession | null): void {

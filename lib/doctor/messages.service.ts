@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
 
-import { getDoctorSession } from './session';
+import { getDoctorSession, resolveDoctorSessionIdentity } from './session';
 import { DOCTOR_STORAGE_KEYS, readJsonStorage, writeJsonStorage } from './storage-keys';
 
 export type ClinicalMessage = {
@@ -19,14 +19,15 @@ export async function sendClinicalMessage(input: {
   priority?: 'normal' | 'urgent';
 }): Promise<{ ok: true; record: ClinicalMessage } | { ok: false; error: string }> {
   const session = getDoctorSession();
+  const identity = resolveDoctorSessionIdentity(session);
   const trimmed = input.message.trim();
   if (!trimmed) return { ok: false, error: 'Message cannot be empty.' };
 
   const record: ClinicalMessage = {
     id: `msg_${Date.now()}`,
     patient_name: input.patientName,
-    doctor_name: session.fullName,
-    doctor_employee_id: session.employeeId,
+    doctor_name: identity.fullName,
+    doctor_employee_id: identity.employeeId,
     message: trimmed,
     priority: input.priority ?? 'normal',
     created_at: new Date().toISOString(),

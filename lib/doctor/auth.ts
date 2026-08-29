@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabaseClient';
-import { getDoctorSession } from '@/lib/doctor/session';
+import { getDoctorSession, resolveDoctorSessionIdentity } from '@/lib/doctor/session';
 import { resolveDoctorIdFromDb } from '@/lib/doctor/command-center/supabase-service';
 import type { DoctorRecord } from '@/lib/doctor/command-center/types';
 
@@ -51,10 +51,11 @@ export async function getAuthenticatedDoctor(): Promise<AuthenticatedDoctor> {
   }
 
   const session = getDoctorSession();
+  const identity = resolveDoctorSessionIdentity(session);
   const resolvedId = await resolveDoctorIdFromDb(
-    session.employeeId,
-    session.fullName || session.doctor_name,
-    session.email,
+    identity.employeeId,
+    identity.fullName,
+    identity.email,
   );
 
   if (resolvedId) {
@@ -69,7 +70,7 @@ export async function getAuthenticatedDoctor(): Promise<AuthenticatedDoctor> {
         return {
           ...(doctor as DoctorRecord),
           doctor_id: String(doctor.doctor_id),
-          authEmail: session.email,
+          authEmail: identity.email,
           source: 'session',
         };
       }
@@ -79,12 +80,12 @@ export async function getAuthenticatedDoctor(): Promise<AuthenticatedDoctor> {
 
     return {
       doctor_id: resolvedId,
-      full_name: session.fullName || session.doctor_name,
-      email: session.email,
-      department: session.department,
-      registration_number: session.employeeId,
-      specialization: session.specialization,
-      authEmail: session.email,
+      full_name: identity.fullName,
+      email: identity.email,
+      department: identity.department,
+      registration_number: identity.employeeId,
+      specialization: identity.specialization,
+      authEmail: identity.email,
       source: 'session',
     };
   }

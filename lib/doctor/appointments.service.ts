@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabaseClient';
 
-import { getDoctorSession } from './session';
+import { getDoctorSession, resolveDoctorSessionIdentity } from './session';
 import { DOCTOR_STORAGE_KEYS, readJsonStorage, writeJsonStorage } from './storage-keys';
 
 export type QueueStatus = 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
@@ -33,9 +33,18 @@ function mergeAppointments(local: PatientAppointment[], remote: PatientAppointme
 
 export async function fetchDoctorQueue(doctorName?: string): Promise<PatientAppointment[]> {
   const session = getDoctorSession();
-  const resolvedDoctor = doctorName ?? session.fullName;
+  const resolvedDoctor =
+    doctorName ??
+    session?.fullName ??
+    (session as { full_name?: string } | null)?.full_name ??
+    (session as { name?: string } | null)?.name ??
+    resolveDoctorSessionIdentity(session).fullName;
+
   const today = new Date().toISOString().split('T')[0];
-  const normalizedDoctor = resolvedDoctor.replace(/^Dr\.?\s*/i, '').trim().toLowerCase();
+  const normalizedDoctor = (resolvedDoctor || '')
+    .replace(/^Dr\.?\s*/i, '')
+    .trim()
+    .toLowerCase();
 
   const localAll = readJsonStorage<PatientAppointment[]>(DOCTOR_STORAGE_KEYS.appointments, []);
   const localFiltered = localAll.filter(
