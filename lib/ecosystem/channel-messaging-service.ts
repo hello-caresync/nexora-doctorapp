@@ -491,7 +491,7 @@ export function subscribeChannelMessages(options: ChannelRealtimeOptions = {}): 
           options.onUpdate?.(row);
         },
       )
-      .subscribe((status) => {
+      .subscribe((status: any) => {
         options.onConnectionChange?.(status === 'SUBSCRIBED');
       });
 
