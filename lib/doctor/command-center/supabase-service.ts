@@ -891,12 +891,35 @@ export async function savePatientClinicalEncounter(
   const spo2 = input.vitals.spo2_percent;
 
   const weight = input.vitals.weight_kg;
-  const tempValue = temp != null && temp !== '' ? parseFloat(String(temp)) : null;
-  const bpSysValue = bpSys != null && bpSys !== '' ? parseInt(String(bpSys), 10) : null;
-  const bpDiaValue = bpDia != null && bpDia !== '' ? parseInt(String(bpDia), 10) : null;
-  const pulseValue = pulse != null && pulse !== '' ? parseInt(String(pulse), 10) : null;
-  const spo2Value = spo2 != null && spo2 !== '' ? parseInt(String(spo2), 10) : null;
-  const weightValue = weight != null && weight !== '' ? parseFloat(String(weight)) : null;
+  const tempValue =
+    temp != null && String(temp).trim() !== ''
+      ? parseFloat(String(temp))
+      : null;
+
+  const bpSysValue =
+    bpSys != null && String(bpSys).trim() !== ''
+      ? parseInt(String(bpSys), 10)
+      : null;
+
+  const bpDiaValue =
+    bpDia != null && String(bpDia).trim() !== ''
+      ? parseInt(String(bpDia), 10)
+      : null;
+
+  const pulseValue =
+    pulse != null && String(pulse).trim() !== ''
+      ? parseInt(String(pulse), 10)
+      : null;
+
+  const spo2Value =
+    spo2 != null && String(spo2).trim() !== ''
+      ? parseInt(String(spo2), 10)
+      : null;
+
+  const weightValue =
+    weight != null && String(weight).trim() !== ''
+      ? parseFloat(String(weight))
+      : null;
 
   const vitalsPayload = {
     consultation_id: createdConsultationId,
