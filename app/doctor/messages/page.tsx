@@ -84,10 +84,10 @@ export default function DoctorSecureMessagesPage() {
   const activeDoctor = useMemo<ActiveDoctorProfile>(() => {
     const session = getDoctorSession();
     return {
-      employee_id: session.employeeId || DEFAULT_DOCTOR_EMPLOYEE_ID,
-      full_name: session.fullName || session.doctor_name || DEFAULT_ACTIVE_DOCTOR_NAME,
-      department: session.department || 'Clinical',
-      uuid: DEFAULT_ACTIVE_DOCTOR_ID,
+      employee_id: session?.employeeId || (session as any)?.doctorId || DEFAULT_DOCTOR_EMPLOYEE_ID,
+      full_name: session?.fullName || (session as any)?.doctorName || (session as any)?.doctor_name || DEFAULT_ACTIVE_DOCTOR_NAME,
+      department: session?.department || 'Clinical',
+      uuid: (session as any)?.id || (session as any)?.uuid || DEFAULT_ACTIVE_DOCTOR_ID,
     };
   }, []);
 
