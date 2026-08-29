@@ -46,8 +46,9 @@ const dedupePatientList = (list: PatientListRow[] | null | undefined = []) => {
 
 const REGAL_HOSPITAL = 'Regal Hospital';
 
-function getPatientDisplayName(patient: PatientListRow): string {
-  return String(patient.patient_name || patient.name || 'Patient').trim() || 'Patient';
+function getPatientDisplayName(patient: PatientListRow | null | undefined): string {
+  if (!patient) return '';
+  return patient.patient_name || patient.name || 'Unknown Patient';
 }
 
 function formatDateLabel(value?: string): string {
