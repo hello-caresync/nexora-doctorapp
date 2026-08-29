@@ -360,7 +360,7 @@ export function subscribeEcosystemMessaging(
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'system_notifications' },
-      (payload) => {
+      (payload: any) => {
         const row = normalizeNotificationRow((payload.new ?? {}) as Record<string, unknown>);
         if (options.app === 'hospital') {
           options.onNotification?.(row);
@@ -374,7 +374,7 @@ export function subscribeEcosystemMessaging(
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'system_events' },
-      (payload) => {
+      (payload: any) => {
         const raw = (payload.new ?? {}) as Record<string, unknown>;
         const roles = (raw.target_roles as string[] | undefined) ?? [];
         if (options.app !== 'hospital' && roles.length > 0 && !roles.includes(options.app)) {
@@ -395,7 +395,7 @@ export function subscribeEcosystemMessaging(
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'channel_messages' }, () => {
       options.onConnectionChange?.(true);
     })
-    .subscribe((status) => {
+    .subscribe((status: any) => {
       options.onConnectionChange?.(status === 'SUBSCRIBED');
     });
 
