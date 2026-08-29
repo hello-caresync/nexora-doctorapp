@@ -10,8 +10,14 @@ import { announcePatientCall } from './voice-engine';
 
 /** Patient App listener — live queue refresh + TTS when doctor calls this patient */
 export function useOpdRealtime() {
-  const { patient } = usePatientAuth();
-  const patientId = patient?.id ?? null;
+  const auth = usePatientAuth() as any;
+  const patientId =
+    auth?.patient?.id ??
+    auth?.patientProfile?.id ??
+    auth?.user?.id ??
+    auth?.patientId ??
+    auth?.session?.patientId ??
+    null;
   const refreshOpdMetrics = useEcosystemStore((s) => s.refreshOpdMetrics);
 
   useEffect(() => {
