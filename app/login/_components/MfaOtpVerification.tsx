@@ -83,7 +83,10 @@ export default function MfaOtpVerification({
   return (
     <AuthLoginShell
       title="OTP Verification"
-      subtitle={`Multi-factor authentication required for ${employeeId}. Enter the 6-digit code.`}
+      subtitle={`Multi-factor authentication for ${employeeId}. Enter the 6-digit passcode.`}
+      activeGlow="from-teal-500/40 via-emerald-500/30 to-cyan-600/40"
+      activeTagColor="bg-teal-500/20 text-teal-300 border-teal-500/30"
+      activeTitle="Two-Factor Security"
     >
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && <AuthAlert tone="error" message={error} />}
@@ -140,7 +143,11 @@ export default function MfaOtpVerification({
           )}
         </div>
 
-        <AuthPrimaryButton loading={loading} disabled={!codeComplete}>
+        <AuthPrimaryButton
+          loading={loading}
+          disabled={!codeComplete}
+          gradientClass="from-teal-500 via-emerald-400 to-cyan-400"
+        >
           Verify &amp; Continue
         </AuthPrimaryButton>
 
