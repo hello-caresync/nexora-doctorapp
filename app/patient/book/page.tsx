@@ -4,7 +4,10 @@ import React, { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { fetchDoctorByUuid, type BookableDoctor } from '@/lib/doctor/bookable-doctors';
 import { DEFAULT_PATIENT_ID } from '@/lib/clinical/bridge';
-import { bookAppointmentWithDoctor } from '@/lib/patient/book-appointment';
+import {
+  bookAppointmentWithDoctor,
+  type BookAppointmentPayload,
+} from '@/lib/patient/book-appointment';
 import { supabase } from '@/lib/supabaseClient';
 import {
   AlertCircle,
@@ -137,12 +140,13 @@ function BookAppointmentContent() {
       await bookAppointmentWithDoctor({
         patientId: PATIENT_ID,
         patientName: selectedPatient,
+        patient_name: selectedPatient,
         doctor: selectedDoctor,
         appointmentDate,
         slotTime: selectedSlot,
         reasonForVisit,
         hospitalName,
-      });
+      } satisfies BookAppointmentPayload);
 
       router.push('/patient/appointments');
     } catch (err: unknown) {

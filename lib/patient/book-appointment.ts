@@ -1,15 +1,23 @@
 import { createClient } from '@/lib/supabase/client';
 
 export interface BookAppointmentPayload {
-  patient_id?: string;
   patientId?: string;
-  doctor_id?: string;
+  patient_id?: string;
+  patientName?: string;
+  patient_name?: string;
+  doctor?: { doctor_id?: string; department?: string; name?: string };
   doctorId?: string;
+  doctor_id?: string;
+  appointmentDate?: string;
   appointment_date?: string;
+  slotTime?: string;
   appointment_time?: string;
   reason?: string;
   reason_for_visit?: string;
+  reasonForVisit?: string;
   department?: string;
+  hospitalName?: string;
+  [key: string]: unknown;
 }
 
 export interface BookAppointmentResponse {
@@ -41,11 +49,23 @@ export async function bookAppointmentWithDoctor(
   const { data: authData } = await supabase.auth.getUser();
   const patientId =
     payload.patient_id || payload.patientId || authData?.user?.id || DEFAULT_PATIENT_ID;
-  const doctorId = payload.doctor_id || payload.doctorId || DEFAULT_DOCTOR_ID;
-  const department = payload.department || DEFAULT_DEPARTMENT;
-  const reasonForVisit = payload.reason_for_visit || payload.reason || DEFAULT_REASON;
-  const appointmentDate = payload.appointment_date || localDateString();
-  const appointmentTime = payload.appointment_time || '10:00 AM';
+  const doctorId =
+    payload.doctor_id ||
+    payload.doctorId ||
+    payload.doctor?.doctor_id ||
+    DEFAULT_DOCTOR_ID;
+  const department =
+    payload.department || payload.doctor?.department || DEFAULT_DEPARTMENT;
+  const reasonForVisit =
+    payload.reason_for_visit ||
+    payload.reasonForVisit ||
+    payload.reason ||
+    DEFAULT_REASON;
+  const appointmentDate =
+    payload.appointment_date || payload.appointmentDate || localDateString();
+  const appointmentTime =
+    payload.appointment_time || payload.slotTime || '10:00 AM';
+  const patientName = payload.patient_name || payload.patientName;
 
   let tokenNumber = 1;
   try {
@@ -65,7 +85,7 @@ export async function bookAppointmentWithDoctor(
 
   const tokenLabel = `T-${tokenNumber.toString().padStart(2, '0')}`;
 
-  const insertPayload = {
+  const insertPayload: Record<string, unknown> = {
     patient_id: patientId,
     doctor_id: doctorId,
     department,
@@ -74,6 +94,13 @@ export async function bookAppointmentWithDoctor(
     appointment_time: appointmentTime,
     status: 'WAITING',
   };
+
+  if (patientName) {
+    insertPayload.patient_name = patientName;
+  }
+  if (payload.hospitalName) {
+    insertPayload.hospital_name = payload.hospitalName;
+  }
 
   const { data: apptData, error: apptError } = await supabase
     .from('appointments')
