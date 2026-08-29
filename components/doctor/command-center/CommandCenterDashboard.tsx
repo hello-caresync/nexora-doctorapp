@@ -62,7 +62,11 @@ export function CommandCenterDashboard(props: CommandCenterDashboardProps) {
   } = props;
   const router = useRouter();
   const session = getDoctorSession();
-  const doctorName = session.fullName || session.doctor_name;
+  const doctorName =
+    session?.fullName ||
+    (session as any)?.doctorName ||
+    (session as any)?.doctor_name ||
+    'Doctor';
 
   const isOnline = useCommandCenterStore((s) => s.isOnline);
   const setOnline = useCommandCenterStore((s) => s.setOnline);
@@ -76,7 +80,11 @@ export function CommandCenterDashboard(props: CommandCenterDashboardProps) {
     isLoading,
     refetch,
     isFetching,
-  } = useDoctorDashboardRealtime(session.employeeId, doctorName, session.email);
+  } = useDoctorDashboardRealtime(
+    session?.employeeId ?? session?.doctorId ?? '',
+    doctorName,
+    session?.email,
+  );
 
   const activeDoctorId = authDoctor?.doctor_id ?? sessionDoctorId ?? metricsProp?.doctorId ?? '';
   const metrics = metricsProp;
@@ -146,10 +154,10 @@ export function CommandCenterDashboard(props: CommandCenterDashboardProps) {
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-[#2A9D8F]">Clinical Command Center</p>
           <h1 className="mt-1 text-2xl font-black text-[#173F5F]">
-            {greeting()}, Dr. {session.fullName || session.doctor_name}
+            {greeting()}, Dr. {doctorName.replace(/^Dr\.?\s*/i, '')}
           </h1>
           <p className="mt-1 text-sm font-semibold text-[#5A7A94]">
-            {session.department} · {today}
+            {session?.department ?? 'Clinical'} · {today}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
