@@ -255,9 +255,10 @@ export async function doctorCompleteConsultationAsync(
       medicines: consultation.prescription.map((m) => ({
         name: m.drug,
         dose: m.dose,
+        dosage: m.dose || (m as { dosage?: string }).dosage || '',
         frequency: m.frequency,
         duration: m.duration,
-        instructions: m.instructions,
+        instructions: m.instructions || '',
       })),
       notes: consultation.treatmentPlan || consultation.plan,
     });
@@ -322,7 +323,7 @@ export async function doctorCompleteConsultationAsync(
     const profile = store.profile;
     await hubDoctorCompleteConsultation(
       { ...resolvedAppt, status: 'Completed' },
-      { generateBillingDraft: true, consultationFee: profile?.consultationFee ?? 800 },
+      { generateBillingDraft: true, consultationFee: (profile as { consultationFee?: number })?.consultationFee ?? 800 },
     );
   } else {
     await persistAppointmentToSupabase(consultation.appointmentId, 'Completed');
@@ -353,13 +354,14 @@ export function doctorSendPrescription(input: {
   const rx = useEcosystemStore.getState().createPrescription({
     patientId: input.patientId,
     doctorId,
-    appointmentId: input.appointmentId,
+    appointmentId: input.appointmentId ?? '',
     medicines: input.medicines.map((m) => ({
       name: m.drug,
       dose: m.dose,
+      dosage: m.dose || (m as { dosage?: string }).dosage || '',
       frequency: m.frequency,
       duration: m.duration,
-      instructions: m.instructions,
+      instructions: m.instructions || '',
     })),
     notes: input.notes,
   });
