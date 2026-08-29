@@ -32,6 +32,9 @@ export default function ForgotPasswordPage() {
     <AuthLoginShell
       title="Reset Credentials"
       subtitle="Submit your registered work email. IT will process credential recovery per sandbox policy."
+      activeGlow="from-teal-500/40 via-emerald-500/30 to-cyan-600/40"
+      activeTagColor="bg-teal-500/20 text-teal-300 border-teal-500/30"
+      activeTitle="Account Recovery"
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         {message && <AuthAlert tone={isSuccess ? 'success' : 'error'} message={message} />}
@@ -46,7 +49,12 @@ export default function ForgotPasswordPage() {
           autoComplete="email"
         />
 
-        <AuthPrimaryButton loading={loading}>Request Reset</AuthPrimaryButton>
+        <AuthPrimaryButton
+          loading={loading}
+          gradientClass="from-teal-500 via-emerald-400 to-cyan-400"
+        >
+          Request Reset
+        </AuthPrimaryButton>
 
         <p className="text-center text-xs text-slate-600">
           <Link href={APP_ROUTES.login} className="font-semibold text-teal-800 hover:underline">
