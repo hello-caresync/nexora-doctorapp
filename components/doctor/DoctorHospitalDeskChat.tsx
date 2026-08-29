@@ -65,9 +65,9 @@ export function DoctorHospitalDeskChat({ compact = false, className = '' }: Doct
   const activeDoctor = useMemo<ActiveDoctorProfile>(() => {
     const session = getDoctorSession();
     return {
-      employee_id: session.employeeId || DEFAULT_DOCTOR_EMPLOYEE_ID,
-      full_name: session.fullName || session.doctor_name || DEFAULT_ACTIVE_DOCTOR_NAME,
-      department: session.department || 'Clinical',
+      employee_id: session?.employeeId || session?.doctorId || DEFAULT_DOCTOR_EMPLOYEE_ID,
+      full_name: session?.fullName || session?.doctorName || session?.doctor_name || DEFAULT_ACTIVE_DOCTOR_NAME,
+      department: session?.department || 'Clinical',
     };
   }, []);
 

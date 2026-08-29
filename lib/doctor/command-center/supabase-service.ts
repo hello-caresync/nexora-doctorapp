@@ -20,6 +20,9 @@ import type {
 /** Canonical active clinician UUID in Supabase (`doctors.doctor_id`). */
 export const DEFAULT_ACTIVE_DOCTOR_ID = '56284599-9a5f-4672-9b53-b90e18146a00';
 
+/** Default employee registration id for desk chat / messaging fallbacks. */
+export const DEFAULT_DOCTOR_EMPLOYEE_ID = 'RH-D01';
+
 /** Alias used by consultation finalize handlers. */
 export const DEFAULT_DOCTOR_UUID = DEFAULT_ACTIVE_DOCTOR_ID;
 
