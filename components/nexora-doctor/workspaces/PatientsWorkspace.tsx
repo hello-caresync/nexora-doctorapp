@@ -76,7 +76,7 @@ export function PatientsWorkspace() {
             </thead>
             <tbody>
               {rows.map(({ patient: p, appt }) => (
-                <tr key={p.id} className={ui.trHover}>
+                <tr key={p.id} className={(ui as any).trHover || 'border-b border-slate-100 hover:bg-slate-50/80 transition-colors'}>
                   <td className={ui.td}>
                     <div className="flex items-center gap-3">
                       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#7A9A8B] text-xs font-bold text-white">
