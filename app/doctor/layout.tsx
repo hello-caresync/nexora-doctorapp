@@ -2,8 +2,6 @@ import React from 'react';
 
 import DoctorProviders from '@/components/doctor/DoctorProviders';
 
-export const dynamic = 'force-dynamic';
-
 export default function DoctorLayout({
   children,
 }: {
