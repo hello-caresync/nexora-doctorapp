@@ -270,8 +270,31 @@ export default function SuperAdminHospitalBlocksDashboard() {
     }
   };
 
+  const resolveAdminLoginUrl = () => {
+    const baseUrl =
+      typeof window !== 'undefined' ? window.location.origin : 'https://nexora-doctorapp.pages.dev';
+    return `${baseUrl}/admin/login`;
+  };
+
   const copyLoginPacket = (staff: StaffCredential) => {
-    const text = `=====================================\n${staff.hospital_name.toUpperCase()}\nOFFICIAL CLINICAL ACCESS PASS\n=====================================\nHospital Node: ${staff.hospital_name} (${staff.hospital_id})\nStaff ID: ${staff.id}\nStaff Member: ${staff.full_name}\nRole: ${staff.staff_type} (${staff.department})\nLogin Email: ${staff.email}\nSecurity Passcode: ${staff.temporary_passcode}\nPortal Login URL: http://localhost:3000/login\nTarget Workspace: ${staff.portal_access}\n=====================================`;
+    const targetLoginUrl = resolveAdminLoginUrl();
+
+    const text = [
+      '=====================================',
+      staff.hospital_name.toUpperCase(),
+      'OFFICIAL CLINICAL ACCESS PASS',
+      '=====================================',
+      `Hospital Node: ${staff.hospital_name} (${staff.hospital_id})`,
+      `Staff ID: ${staff.id}`,
+      `Staff Member: ${staff.full_name}`,
+      `Role: ${staff.staff_type} (${staff.department})`,
+      `Login Email: ${staff.email}`,
+      `Security Passcode: ${staff.temporary_passcode}`,
+      `Portal Login URL: ${targetLoginUrl}`,
+      `Target Workspace: ${staff.portal_access}`,
+      '=====================================',
+    ].join('\n');
+
     navigator.clipboard.writeText(text);
     setCopiedId(staff.id);
     setTimeout(() => setCopiedId(null), 2500);
@@ -695,7 +718,10 @@ export default function SuperAdminHospitalBlocksDashboard() {
                 <div className="text-slate-300">Admin Name: <span className="text-white font-bold">{createdPacket.full_name}</span></div>
                 <div className="text-slate-300">Official Login: <span className="text-white font-bold">{createdPacket.email}</span></div>
                 <div className="text-slate-300">Security Passcode: <span className="text-emerald-400 font-bold">{createdPacket.temporary_passcode}</span></div>
-                <div className="text-slate-300">Login Gateway: <span className="text-indigo-300 underline">http://localhost:3000/login</span></div>
+                <div className="text-slate-300">
+                  Login Gateway:{' '}
+                  <span className="text-indigo-300 underline">{resolveAdminLoginUrl()}</span>
+                </div>
               </div>
 
               <div className="flex gap-3">
