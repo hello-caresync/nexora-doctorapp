@@ -395,8 +395,8 @@ function StaffCredentialsContent() {
         )}
 
         {activeTab === 'staff' && (
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
-          <div className="xl:col-span-4 rounded-2xl bg-white border border-slate-200 p-6 shadow-2xs space-y-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          <div className="lg:col-span-4 h-fit self-start rounded-2xl bg-white border border-slate-200 p-6 shadow-2xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 <UserPlus className="w-4 h-4 text-purple-700" />
@@ -516,7 +516,7 @@ function StaffCredentialsContent() {
             </form>
           </div>
 
-          <div className="xl:col-span-8 rounded-2xl bg-white border border-slate-200 p-6 shadow-2xs space-y-4">
+          <div className="lg:col-span-8 h-fit self-start rounded-2xl bg-white border border-slate-200 p-6 shadow-2xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
                 Provisioned Team ({staffList.length})
