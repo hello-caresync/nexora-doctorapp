@@ -18,20 +18,11 @@ import {
 import { authenticateHospitalDoctor } from '@/lib/doctor/hospital-auth';
 import { saveDoctorSession } from '@/lib/doctor/session';
 
-const QUICK_CLINICIANS = [
-  { id: 'RH-D01', name: 'Dr. Suriraju V', email: 'dr.suriraju@regalhospital.com', pass: 'Suri@Uro9101' },
-  { id: 'RH-D02', name: 'Dr. Chandrakanth', email: 'dr.kesari@regalhospital.com', pass: 'Kesari@Gen9102' },
-  { id: 'RH-D03', name: 'Dr. Ananya R', email: 'dr.ananya@regalhospital.com', pass: 'Anan@Med9103' },
-] as const;
-
-const DOCTOR_ILLUSTRATION =
-  'https://illustrations.popsy.co/teal-doctor.svg';
-
 export default function DoctorLoginPage() {
   const router = useRouter();
 
-  const [identifier, setIdentifier] = useState('dr.suriraju@regalhospital.com');
-  const [passcode, setPasscode] = useState('Suri@Uro9101');
+  const [identifier, setIdentifier] = useState('');
+  const [passcode, setPasscode] = useState('');
   const [showPasscode, setShowPasscode] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
@@ -231,31 +222,6 @@ export default function DoctorLoginPage() {
                 )}
               </button>
             </form>
-          </div>
-
-          <div className="mt-6 border-t border-slate-100 pt-4">
-            <span className="mb-2 block text-[10px] font-bold uppercase tracking-wider text-slate-400">
-              Quick Clinician Switch:
-            </span>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_CLINICIANS.map((doc) => (
-                <button
-                  key={doc.id}
-                  type="button"
-                  onClick={() => {
-                    setIdentifier(doc.email);
-                    setPasscode(doc.pass);
-                  }}
-                  className={`cursor-pointer rounded-lg border px-2.5 py-1 text-[10px] font-bold transition-all ${
-                    identifier === doc.email
-                      ? 'border-teal-500 bg-teal-50 text-teal-800 shadow-xs'
-                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
-                  }`}
-                >
-                  {doc.name}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
 

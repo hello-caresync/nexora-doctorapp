@@ -1,1 +1,1 @@
-export { default } from '@/components/auth/PlatformRootConsole';
+export { default } from '@/app/super-admin/login/page';

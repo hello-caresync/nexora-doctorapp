@@ -191,13 +191,7 @@ export async function authenticatePortalCredential(params: {
 export async function loadHospitalOptionsForLogin(): Promise<
   { id: string; name: string; location: string }[]
 > {
-  const fallback = [
-    { id: 'HOSP-01', name: 'Regal Hospital Main', location: 'Bengaluru' },
-    { id: 'HOSP-02', name: 'Apollo Super Speciality', location: 'Bengaluru' },
-    { id: 'HOSP-03', name: 'Manipal Health Institute', location: 'Bengaluru' },
-  ];
-
-  if (!supabase) return fallback;
+  if (!supabase) return [];
 
   const { data: hospitals } = await supabase
     .from('hospitals')
@@ -250,5 +244,5 @@ export async function loadHospitalOptionsForLogin(): Promise<
     }
   }
 
-  return fallback;
+  return [];
 }
