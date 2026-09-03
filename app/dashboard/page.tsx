@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Activity,
@@ -9,8 +9,6 @@ import {
   Building2,
   CheckCircle2,
   ClipboardCheck,
-  Copy,
-  FlaskConical,
   HeartHandshake,
   IndianRupee,
   LayoutGrid,
@@ -18,23 +16,22 @@ import {
   Loader2,
   LogOut,
   Menu,
-  MessageSquareQuote,
   PackageCheck,
+  Pill,
   Plus,
   RefreshCw,
-  Search,
   ShieldCheck,
   Users,
   X,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { toast } from 'sonner';
+import { isHospitalSetupCompleted } from '@/lib/auth/admin-setup';
+import { clearActiveSession } from '@/lib/auth/active-session';
 import {
   isHospitalAppRole,
   readHospitalAppSession,
 } from '@/lib/auth/ecosystem-sessions';
-import { isHospitalSetupCompleted } from '@/lib/auth/admin-setup';
-import { clearActiveSession } from '@/lib/auth/active-session';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -46,12 +43,12 @@ type NavModule =
   | 'patients'
   | 'ipd'
   | 'pharmacy'
-  | 'labs'
   | 'emergency'
   | 'billing'
   | 'supply'
-  | 'staff'
-  | 'messages';
+  | 'staff';
+
+type ModalKind = 'opd' | 'pharmacy' | 'bed' | 'invoice' | 'supply' | null;
 
 type HospitalInfo = {
   id: string;
@@ -61,7 +58,7 @@ type HospitalInfo = {
   adminEmail: string;
 };
 
-type StaffMember = {
+type StaffRow = {
   id: string;
   full_name: string;
   staff_type: string;
@@ -72,132 +69,57 @@ type StaffMember = {
   status?: string;
 };
 
-type QueueItem = {
+type QueueRow = {
   id: string;
   token: string;
   patient_name: string;
-  age: string;
   department: string;
+  phone: string;
   doctor_name: string;
   status: string;
-  notes: string;
-  time: string;
 };
 
-type PatientRecord = {
+type PharmacyRow = {
   id: string;
-  name: string;
-  uhid: string;
-  phone: string;
-  department: string;
-  status: string;
-};
-
-type BedRecord = {
-  id: string;
-  ward: string;
-  bed: string;
-  status: string;
-  patient: string;
-  doc: string;
-};
-
-type PharmacyRecord = {
-  id: string;
-  name: string;
+  item_name: string;
   category: string;
   stock: number;
   status: string;
 };
 
-type LabRecord = {
+type BedRow = {
   id: string;
-  patient_name: string;
-  test: string;
-  doctor_name: string;
+  ward_name: string;
+  bed_number: string;
   status: string;
-  time: string;
+  patient_name: string;
 };
 
-type EmergencyRecord = {
+type InvoiceRow = {
+  id: string;
+  patient_name: string;
+  service_type: string;
+  amount: number;
+  status: string;
+};
+
+type SupplyRow = {
+  id: string;
+  po_number: string;
+  vendor_name: string;
+  item_description: string;
+  quantity: number;
+  total_amount: number;
+  status: string;
+};
+
+type EmergencyRow = {
   id: string;
   patient_name: string;
   complaint: string;
   priority: string;
   status: string;
-  time: string;
 };
-
-type BillRecord = {
-  id: string;
-  invoice: string;
-  patient_name: string;
-  consultation: number;
-  pharmacy: number;
-  total: number;
-  status: string;
-};
-
-type SupplyOrder = {
-  id: string;
-  vendor: string;
-  item: string;
-  amount: string;
-  status: string;
-  time: string;
-};
-
-type MessageRecord = {
-  id: string;
-  title: string;
-  body: string;
-  from: string;
-  target: string;
-  time: string;
-};
-
-const FALLBACK_OPD: QueueItem[] = [
-  { id: 'A-101', token: 'A-101', patient_name: 'Ramesh Gowda', age: '48', department: 'General Medicine', doctor_name: 'Dr. Suriraju V', status: 'In Consultation', notes: '', time: '10:15 AM' },
-  { id: 'A-102', token: 'A-102', patient_name: 'Meenakshi Sundaram', age: '34', department: 'Cardiology', doctor_name: 'Dr. Rajesh Sharma', status: 'Vitals Done', notes: '', time: '10:22 AM' },
-  { id: 'A-103', token: 'A-103', patient_name: 'Praveen Kumar', age: '29', department: 'Orthopedics', doctor_name: 'Dr. Ananya S', status: 'Waiting', notes: '', time: '10:30 AM' },
-  { id: 'A-104', token: 'A-104', patient_name: 'Sunita Devi', age: '52', department: 'Neurology', doctor_name: 'Dr. Suriraju V', status: 'Waiting', notes: '', time: '10:35 AM' },
-  { id: 'A-105', token: 'A-105', patient_name: 'Mohammad Farooq', age: '41', department: 'General Medicine', doctor_name: 'Dr. Suriraju V', status: 'Triaged', notes: '', time: '10:40 AM' },
-];
-
-const FALLBACK_BEDS: BedRecord[] = [
-  { id: 'ICU-01', ward: 'Intensive Care Unit', bed: '01', status: 'Occupied', patient: 'Kiran Kumar', doc: 'Dr. Suriraju V' },
-  { id: 'ICU-02', ward: 'Intensive Care Unit', bed: '02', status: 'Available', patient: '-', doc: '-' },
-  { id: 'GEN-01', ward: 'General Medical Ward', bed: '01', status: 'Occupied', patient: 'Meera Rao', doc: 'Dr. Ananya S' },
-  { id: 'GEN-02', ward: 'General Medical Ward', bed: '02', status: 'Occupied', patient: 'Vijay Patil', doc: 'Dr. Suriraju V' },
-  { id: 'GEN-03', ward: 'General Medical Ward', bed: '03', status: 'Available', patient: '-', doc: '-' },
-];
-
-const FALLBACK_SUPPLY: SupplyOrder[] = [
-  { id: 'ORD-8821', vendor: 'MedLife Pharma', item: 'Surgical Gloves & Syringes', amount: '₹42,500', status: 'Dispatched', time: '10 mins ago' },
-  { id: 'ORD-8822', vendor: 'Apex Biomedical', item: 'Pulse Oximeter Probes (x20)', amount: '₹18,200', status: 'In Transit', time: '1 hr ago' },
-  { id: 'ORD-8823', vendor: 'Reliance Labs', item: 'Biochemical Reagent Kits', amount: '₹76,000', status: 'Delivered', time: 'Today, 9:30 AM' },
-];
-
-const REALTIME_TABLES = [
-  'hospital_staff_credentials',
-  'appointments',
-  'patient_appointments',
-  'opd_queue',
-  'opd_queues',
-  'patients',
-  'hospital_beds',
-  'inventory_items',
-  'prescriptions',
-  'clinical_notes',
-  'emergency_triages',
-  'bills',
-  'billing_invoices',
-  'purchase_orders',
-  'hospital_procurement_orders',
-  'vendor_orders',
-  'system_notifications',
-  'channel_messages',
-];
 
 function inr(amount: number): string {
   return new Intl.NumberFormat('en-IN', {
@@ -207,302 +129,228 @@ function inr(amount: number): string {
   }).format(Number.isFinite(amount) ? amount : 0);
 }
 
-function relativeTime(value?: string): string {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  const diff = Date.now() - date.getTime();
-  const mins = Math.max(0, Math.floor(diff / 60000));
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins} mins ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return date.toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' });
-}
-
 function nodeCodeFor(hospitalId: string): string {
-  if (!hospitalId || hospitalId === 'HOSP-01') return 'RH-BLR-01';
-  return hospitalId.replace('HOSP-', 'RH-');
+  return hospitalId;
 }
 
-function matchesHospital(row: Record<string, unknown>, hospitalId: string, hospitalName: string): boolean {
-  const rowId = String(row.hospital_id ?? '').trim();
-  if (rowId && rowId === hospitalId) return true;
-  const rowName = String(row.hospital_name ?? '').trim().toLowerCase();
-  if (rowName && hospitalName && rowName.includes(hospitalName.toLowerCase())) return true;
-  const code = String(row.facility_code ?? row.hospital_code ?? '').trim();
-  if (code && (code === 'RH-BLR-01' || code === hospitalId) && (hospitalId === 'HOSP-01' || hospitalName.toLowerCase().includes('regal'))) {
-    return true;
-  }
-  return !rowId && !rowName && !code;
-}
-
-async function selectRows(table: string): Promise<Record<string, unknown>[]> {
-  if (!supabase) return [];
-  const { data, error } = await supabase.from(table).select('*').order('created_at', { ascending: false });
+async function selectScoped(table: string, hospitalId: string): Promise<Record<string, unknown>[]> {
+  if (!supabase || !hospitalId) return [];
+  const { data, error } = await supabase.from(table).select('*').eq('hospital_id', hospitalId);
   if (error || !data) return [];
   return data as Record<string, unknown>[];
 }
 
-function mapQueue(row: Record<string, unknown>): QueueItem {
-  const id = String(row.id ?? row.appointment_id ?? crypto.randomUUID());
-  const token = String(row.token_number ?? row.token ?? row.queue_number ?? `OPD-${id.slice(0, 4).toUpperCase()}`);
-  return {
-    id,
-    token,
-    patient_name: String(row.patient_name ?? row.name ?? '—'),
-    age: String(row.age ?? '—'),
-    department: String(row.department ?? 'General Medicine'),
-    doctor_name: String(row.doctor_name ?? row.assigned_doctor ?? 'Unassigned'),
-    status: String(row.status ?? row.queue_status ?? 'Waiting'),
-    notes: String(row.chief_complaint ?? row.clinical_advice ?? row.diagnosis ?? row.reason_for_visit ?? ''),
-    time: relativeTime(String(row.updated_at ?? row.created_at ?? row.slot_time ?? '')),
-  };
+async function insertFirst(
+  attempts: Array<{ table: string; payload: Record<string, unknown> }>,
+): Promise<string | null> {
+  if (!supabase) return 'Supabase is not configured';
+  let lastError = 'Insert failed';
+  for (const attempt of attempts) {
+    const { error } = await supabase.from(attempt.table).insert(attempt.payload);
+    if (!error) return null;
+    lastError = error.message;
+  }
+  return lastError;
 }
 
-export default function RegalHospitalApp() {
+function EmptyState({
+  icon: Icon,
+  title,
+  body,
+  actionLabel,
+  onAction,
+}: {
+  icon: typeof Users;
+  title: string;
+  body: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="p-12 text-center space-y-3 border border-dashed border-slate-200 rounded-2xl">
+      <Icon className="w-8 h-8 mx-auto text-slate-300" />
+      <div className="text-sm font-bold text-slate-700">{title}</div>
+      <p className="text-xs text-slate-400 max-w-md mx-auto">{body}</p>
+      <button
+        type="button"
+        onClick={onAction}
+        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold"
+      >
+        <Plus className="w-3.5 h-3.5" />
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+export default function HospitalMasterDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<NavModule>('dashboard');
-  const [currentUserRole, setCurrentUserRole] = useState<string>('Staff');
+  const [currentUserRole, setCurrentUserRole] = useState('Staff');
   const [isLoading, setIsLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [walkInName, setWalkInName] = useState('');
-  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [activeModal, setActiveModal] = useState<ModalKind>(null);
 
   const [hospitalInfo, setHospitalInfo] = useState<HospitalInfo>({
     id: '',
-    nodeCode: 'RH-BLR-01',
-    name: 'Regal Hospital',
+    nodeCode: '',
+    name: '',
     adminName: '',
     adminEmail: '',
   });
 
-  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-  const [opdQueue, setOpdQueue] = useState<QueueItem[]>(FALLBACK_OPD);
-  const [patientRegistry, setPatientRegistry] = useState<PatientRecord[]>([]);
-  const [bedCensus, setBedCensus] = useState<BedRecord[]>(FALLBACK_BEDS);
-  const [pharmacyItems, setPharmacyItems] = useState<PharmacyRecord[]>([]);
-  const [labOrders, setLabOrders] = useState<LabRecord[]>([]);
-  const [emergencyDesk, setEmergencyDesk] = useState<EmergencyRecord[]>([]);
-  const [bills, setBills] = useState<BillRecord[]>([]);
-  const [supplyOrders, setSupplyOrders] = useState<SupplyOrder[]>(FALLBACK_SUPPLY);
-  const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [staffMembers, setStaffMembers] = useState<StaffRow[]>([]);
+  const [opdQueue, setOpdQueue] = useState<QueueRow[]>([]);
+  const [pharmacyItems, setPharmacyItems] = useState<PharmacyRow[]>([]);
+  const [beds, setBeds] = useState<BedRow[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
+  const [supplyOrders, setSupplyOrders] = useState<SupplyRow[]>([]);
+  const [emergencies, setEmergencies] = useState<EmergencyRow[]>([]);
 
-  const loadPlatformData = useCallback(async (node?: HospitalInfo) => {
-    const hospital = node ?? hospitalInfo;
-    if (!hospital.id || !supabase) return;
+  const [opdForm, setOpdForm] = useState({ patientName: '', department: 'General Medicine', phone: '' });
+  const [medForm, setMedForm] = useState({ name: '', category: 'Medicine', stock: 100 });
+  const [bedForm, setBedForm] = useState({ ward: 'General Ward', bedNumber: '', patientName: '' });
+  const [invoiceForm, setInvoiceForm] = useState({ patientName: '', service: 'OPD Consultation', amount: 800 });
+  const [supplyForm, setSupplyForm] = useState({ vendor: '', item: '', quantity: 1, amount: 0 });
+
+  const loadPlatformData = useCallback(async (hospitalId: string) => {
+    if (!supabase || !hospitalId) return;
     setIsLoading(true);
 
     try {
       const [
         staffRows,
-        appointmentRows,
-        legacyApptRows,
-        queueRows,
-        queueAltRows,
-        patientRows,
-        bedRows,
+        aptRows,
+        opdRows,
+        patientAptRows,
+        pharmRows,
         inventoryRows,
-        rxRows,
-        noteRows,
-        emergencyRows,
-        billRows,
+        bedRows,
         invoiceRows,
+        billRows,
         poRows,
-        procurementRows,
-        vendorOrderRows,
-        notificationRows,
-        channelRows,
+        supplyRows,
+        emergencyRows,
+        hospitalEmergencyRows,
       ] = await Promise.all([
-        selectRows('hospital_staff_credentials'),
-        selectRows('appointments'),
-        selectRows('patient_appointments'),
-        selectRows('opd_queue'),
-        selectRows('opd_queues'),
-        selectRows('patients'),
-        supabase.from('hospital_beds').select('*').then((res) => (res.error || !res.data ? [] : (res.data as Record<string, unknown>[]))),
-        selectRows('inventory_items'),
-        selectRows('prescriptions'),
-        selectRows('clinical_notes'),
-        selectRows('emergency_triages'),
-        selectRows('bills'),
-        selectRows('billing_invoices'),
-        selectRows('purchase_orders'),
-        selectRows('hospital_procurement_orders'),
-        selectRows('vendor_orders'),
-        selectRows('system_notifications'),
-        selectRows('channel_messages'),
+        selectScoped('hospital_staff_credentials', hospitalId),
+        selectScoped('appointments', hospitalId),
+        selectScoped('hospital_opd_queue', hospitalId),
+        selectScoped('patient_appointments', hospitalId),
+        selectScoped('hospital_pharmacy_inventory', hospitalId),
+        selectScoped('inventory_items', hospitalId),
+        selectScoped('hospital_beds', hospitalId),
+        selectScoped('hospital_invoices', hospitalId),
+        selectScoped('bills', hospitalId),
+        selectScoped('purchase_orders', hospitalId),
+        selectScoped('hospital_supply_orders', hospitalId),
+        selectScoped('emergency_triages', hospitalId),
+        selectScoped('hospital_emergencies', hospitalId),
       ]);
 
-      const scopedStaff = staffRows.filter((row) => matchesHospital(row, hospital.id, hospital.name));
       setStaffMembers(
-        scopedStaff.map((row) => ({
+        staffRows.map((row) => ({
           id: String(row.id ?? ''),
           full_name: String(row.full_name ?? ''),
           staff_type: String(row.staff_type ?? ''),
           department: String(row.department ?? ''),
           email: String(row.email ?? ''),
-          temporary_passcode: String(row.temporary_passcode ?? row.passcode ?? ''),
+          temporary_passcode: String(row.temporary_passcode ?? ''),
           portal_access: String(row.portal_access ?? ''),
           status: String(row.status ?? 'Active'),
         })),
       );
 
-      const queueMap = new Map<string, QueueItem>();
-      [...appointmentRows, ...legacyApptRows, ...queueRows, ...queueAltRows]
-        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
-        .forEach((row) => {
-          const mapped = mapQueue(row);
-          if (!queueMap.has(mapped.id)) queueMap.set(mapped.id, mapped);
-        });
-      const liveQueue = Array.from(queueMap.values());
-      setOpdQueue(liveQueue.length > 0 ? liveQueue : FALLBACK_OPD);
+      const queueSource = [...aptRows, ...opdRows, ...patientAptRows];
+      const seenQueueIds = new Set<string>();
+      setOpdQueue(
+        queueSource.flatMap((row) => {
+          const id = String(row.id ?? row.token_number ?? row.uhid ?? '');
+          if (!id || seenQueueIds.has(id)) return [];
+          seenQueueIds.add(id);
+          return [{
+            id,
+            token: String(row.token_number ?? row.uhid ?? row.token ?? row.id ?? ''),
+            patient_name: String(row.patient_name ?? row.name ?? ''),
+            department: String(row.department ?? 'OPD'),
+            phone: String(row.phone ?? row.patient_phone ?? ''),
+            doctor_name: String(row.doctor_name ?? ''),
+            status: String(row.status ?? row.queue_status ?? 'Waiting'),
+          }];
+        }),
+      );
 
-      const patients = patientRows
-        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
-        .map((row) => ({
+      const pharmacySource = pharmRows.length > 0 ? pharmRows : inventoryRows;
+      setPharmacyItems(
+        pharmacySource.map((row) => ({
           id: String(row.id ?? ''),
-          name: String(row.full_name ?? row.name ?? row.patient_name ?? '—'),
-          uhid: String(row.uhid ?? row.id ?? '—'),
-          phone: String(row.phone ?? row.patient_phone ?? '—'),
-          department: String(row.department ?? 'OPD'),
-          status: String(row.status ?? row.admission_status ?? 'active'),
-        }));
-      if (patients.length > 0) {
-        setPatientRegistry(patients);
-      } else {
-        const fromQueue = Array.from(queueMap.values()).map((item) => ({
-          id: item.id,
-          name: item.patient_name,
-          uhid: item.token,
-          phone: '—',
-          department: item.department,
-          status: item.status,
-        }));
-        setPatientRegistry(fromQueue);
-      }
-
-      if (bedRows.length > 0) {
-        setBedCensus(
-          bedRows.map((row, index) => ({
-            id: String(row.id ?? `BED-${index + 1}`),
-            ward: String(row.ward ?? row.ward_name ?? 'General Ward'),
-            bed: String(row.bed_number ?? row.bed ?? String(index + 1).padStart(2, '0')),
-            status: Boolean(row.is_occupied) || /occup/i.test(String(row.status ?? '')) ? 'Occupied' : 'Available',
-            patient: String(row.patient_name ?? '-'),
-            doc: String(row.doctor ?? row.doctor_name ?? '-'),
-          })),
-        );
-      }
-
-      if (inventoryRows.length > 0) {
-        setPharmacyItems(
-          inventoryRows.map((row) => {
-            const stock = Number(row.quantity_in_stock ?? row.in_stock ?? row.stock ?? 0);
-            const reorder = Number(row.reorder_level ?? 10);
-            return {
-              id: String(row.id ?? row.item_code ?? ''),
-              name: String(row.item_name ?? row.name ?? 'Item'),
-              category: String(row.category ?? 'Medicine'),
-              stock,
-              status: stock <= reorder ? 'Low Stock' : 'In Stock',
-            };
-          }),
-        );
-      } else if (rxRows.length > 0) {
-        setPharmacyItems(
-          rxRows.slice(0, 12).map((row) => ({
-            id: String(row.id ?? ''),
-            name: String(row.medication_name ?? row.patient_name ?? 'Prescription'),
-            category: String(row.status ?? 'Rx'),
-            stock: 1,
-            status: String(row.status ?? 'Pending'),
-          })),
-        );
-      }
-
-      const labs = [...noteRows, ...rxRows]
-        .filter((row) => matchesHospital(row, hospital.id, hospital.name) || !row.hospital_id)
-        .map((row) => ({
-          id: String(row.id ?? ''),
-          patient_name: String(row.patient_name ?? '—'),
-          test: String(row.diagnosis_disease ?? row.clinical_advice ?? row.prescription ?? 'Diagnostic review'),
-          doctor_name: String(row.doctor_name ?? '—'),
-          status: String(row.status ?? 'Reported'),
-          time: relativeTime(String(row.created_at ?? '')),
-        }));
-      setLabOrders(labs.slice(0, 20));
-
-      setEmergencyDesk(
-        emergencyRows.map((row) => ({
-          id: String(row.id ?? ''),
-          patient_name: String(row.patient_name ?? '—'),
-          complaint: String(row.chief_complaint ?? ''),
-          priority: String(row.priority ?? 'P3'),
-          status: String(row.status ?? 'active'),
-          time: relativeTime(String(row.created_at ?? '')),
+          item_name: String(row.item_name ?? row.name ?? ''),
+          category: String(row.category ?? 'Medicine'),
+          stock: Number(row.stock ?? row.quantity_in_stock ?? 0),
+          status: String(row.status ?? (Number(row.stock ?? row.quantity_in_stock ?? 0) > 0 ? 'In Stock' : 'Out of Stock')),
         })),
       );
 
-      const billed = [...billRows, ...invoiceRows]
-        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
-        .map((row) => {
-          const consultation = Number(row.consultation_fee ?? 0);
-          const pharmacy = Number(row.pharmacy_charges ?? 0);
-          const total = Number(row.total_amount ?? consultation + pharmacy);
-          return {
-            id: String(row.id ?? ''),
-            invoice: String(row.invoice_number ?? row.id ?? 'INV'),
-            patient_name: String(row.patient_name ?? '—'),
-            consultation,
-            pharmacy,
-            total,
-            status: String(row.status ?? row.payment_status ?? 'unpaid'),
-          };
-        });
-      setBills(billed);
+      setBeds(
+        bedRows.map((row) => ({
+          id: String(row.id ?? ''),
+          ward_name: String(row.ward_name ?? row.ward ?? ''),
+          bed_number: String(row.bed_number ?? ''),
+          status: String(row.status ?? (row.is_occupied ? 'Occupied' : 'Available')),
+          patient_name: String(row.patient_name ?? '-'),
+        })),
+      );
 
-      const orders = [...poRows, ...procurementRows, ...vendorOrderRows]
-        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
-        .map((row) => ({
-          id: String(row.po_number ?? row.id ?? 'ORD'),
-          vendor: String(row.vendor_name ?? row.vendor ?? 'Vendor'),
-          item: String(row.item_details ?? row.item ?? row.items ?? 'Procurement lot'),
-          amount: inr(Number(row.total_amount ?? row.amount ?? 0)),
+      const invoiceSource = invoiceRows.length > 0 ? invoiceRows : billRows;
+      setInvoices(
+        invoiceSource.map((row) => ({
+          id: String(row.invoice_number ?? row.id ?? ''),
+          patient_name: String(row.patient_name ?? ''),
+          service_type: String(row.service_type ?? row.bill_type ?? 'OPD Consultation'),
+          amount: Number(row.amount ?? row.total_amount ?? 0),
+          status: String(row.status ?? 'unpaid'),
+        })),
+      );
+
+      const supplySource = supplyRows.length > 0 ? supplyRows : poRows;
+      setSupplyOrders(
+        supplySource.map((row) => ({
+          id: String(row.id ?? ''),
+          po_number: String(row.po_number ?? row.id ?? ''),
+          vendor_name: String(row.vendor_name ?? ''),
+          item_description: String(row.item_description ?? row.item_details ?? ''),
+          quantity: Number(row.quantity ?? row.quantity_ordered ?? 1),
+          total_amount: Number(row.total_amount ?? 0),
           status: String(row.status ?? 'ISSUED'),
-          time: relativeTime(String(row.updated_at ?? row.created_at ?? '')),
-        }));
-      if (orders.length > 0) setSupplyOrders(orders);
+        })),
+      );
 
-      const inbox = [...notificationRows, ...channelRows].map((row) => ({
-        id: String(row.id ?? ''),
-        title: String(row.title ?? row.subject ?? 'Ecosystem update'),
-        body: String(row.message ?? row.body ?? row.message_text ?? ''),
-        from: String(row.sender_role ?? row.sender_name ?? row.source_app ?? 'system'),
-        target: String(row.target_app ?? row.recipient_type ?? 'hospital'),
-        time: relativeTime(String(row.created_at ?? '')),
-      }));
-      setMessages(inbox.slice(0, 30));
+      const emergencySource = emergencyRows.length > 0 ? emergencyRows : hospitalEmergencyRows;
+      setEmergencies(
+        emergencySource.map((row) => ({
+          id: String(row.id ?? ''),
+          patient_name: String(row.patient_name ?? ''),
+          complaint: String(row.chief_complaint ?? ''),
+          priority: String(row.priority ?? 'P3'),
+          status: String(row.status ?? 'active'),
+        })),
+      );
     } catch (err) {
-      console.error('Failed to sync hospital data:', err);
+      console.error('Error fetching scoped platform data:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [hospitalInfo]);
+  }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-
     const session = readHospitalAppSession();
     const hospitalId = session?.hospital_id;
     const staffType = session?.staff_type || 'Staff';
-
     setCurrentUserRole(staffType);
 
     if (!hospitalId || !isHospitalAppRole(staffType)) {
-      router.replace(staffType && staffType !== 'Admin' ? '/staff/login' : '/admin/login');
+      router.replace(staffType !== 'Admin' ? '/staff/login' : '/admin/login');
       return;
     }
 
@@ -518,7 +366,7 @@ export default function RegalHospitalApp() {
       setHospitalInfo({
         id: hospitalId,
         nodeCode: nodeCodeFor(hospitalId),
-        name: session.hospital_name || 'Regal Hospital',
+        name: session.hospital_name || 'Hospital Node',
         adminName: session.full_name || 'Hospital User',
         adminEmail: session.email || '',
       });
@@ -528,101 +376,219 @@ export default function RegalHospitalApp() {
 
   useEffect(() => {
     if (isVerifying || !hospitalInfo.id) return;
-    void loadPlatformData(hospitalInfo);
-  }, [isVerifying, hospitalInfo.id, loadPlatformData, hospitalInfo]);
+    void loadPlatformData(hospitalInfo.id);
 
-  useEffect(() => {
-    if (!supabase || isVerifying || !hospitalInfo.id) return;
+    if (!supabase) return;
 
-    let channel = supabase.channel(`regal_hospital_os_${hospitalInfo.id}`);
-    REALTIME_TABLES.forEach((table) => {
-      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
-        void loadPlatformData(hospitalInfo);
-      });
-    });
-    channel.subscribe();
+    const channel = supabase
+      .channel(`hospital_os_realtime_${hospitalInfo.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_opd_queue', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_staff_credentials', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_pharmacy_inventory', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_beds', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_invoices', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_supply_orders', filter: `hospital_id=eq.${hospitalInfo.id}` }, () => void loadPlatformData(hospitalInfo.id))
+      .subscribe();
 
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [hospitalInfo, isVerifying, loadPlatformData]);
+  }, [hospitalInfo.id, isVerifying, loadPlatformData]);
 
-  const waitingCount = opdQueue.filter((item) => /wait|schedul|check|token|triage/i.test(item.status)).length;
-  const consultingCount = opdQueue.filter((item) => /consult|progress|exam/i.test(item.status)).length;
-  const completedCount = opdQueue.filter((item) => /complete|done|discharg|prescrib/i.test(item.status)).length;
-  const occupiedBeds = bedCensus.filter((bed) => bed.status === 'Occupied').length;
-  const occupancyRate = bedCensus.length === 0 ? 0 : Math.round((occupiedBeds / bedCensus.length) * 100);
-  const unpaidTotal = bills.filter((bill) => !/paid|settled/i.test(bill.status)).reduce((sum, bill) => sum + bill.total, 0);
-  const collectedTotal = bills.reduce((sum, bill) => sum + bill.total, 0);
-  const emergencyActive = emergencyDesk.filter((item) => !/closed|discharged|resolved/i.test(item.status)).length;
-
-  const filteredStaff = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return staffMembers;
-    return staffMembers.filter(
-      (member) =>
-        member.full_name.toLowerCase().includes(query) ||
-        member.staff_type.toLowerCase().includes(query) ||
-        member.department.toLowerCase().includes(query) ||
-        member.email.toLowerCase().includes(query),
-    );
-  }, [staffMembers, searchQuery]);
-
-  const navLinks: Array<{
-    id: NavModule;
-    label: string;
-    icon: typeof LayoutGrid;
-    badge?: number;
-    badgeColor?: string;
-  }> = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
-    { id: 'smartq', label: 'SmartQ OPD', icon: ListOrdered, badge: opdQueue.length },
-    { id: 'patients', label: 'Patients', icon: Users, badge: patientRegistry.length },
-    { id: 'ipd', label: 'IPD & Bed Census', icon: BedDouble, badge: occupiedBeds },
-    { id: 'pharmacy', label: 'Records & Pharmacy', icon: ClipboardCheck },
-    { id: 'labs', label: 'Diagnostics & Labs', icon: FlaskConical },
-    { id: 'emergency', label: 'Emergency Desk', icon: AlertTriangle, badge: emergencyActive, badgeColor: 'bg-rose-500' },
-    { id: 'billing', label: 'Billing & Cashier', icon: IndianRupee },
-    { id: 'supply', label: 'Supply & Orders', icon: PackageCheck, badge: supplyOrders.length },
-    { id: 'staff', label: 'Doctors & Staff', icon: HeartHandshake, badge: staffMembers.length },
-    { id: 'messages', label: 'Ecosystem Messages', icon: MessageSquareQuote, badge: messages.length },
-  ];
-
-  const openModule = (id: NavModule) => {
-    setActiveTab(id);
-    setMobileNavOpen(false);
-  };
+  const closeModal = () => setActiveModal(null);
 
   const handleIssueToken = async (event: React.FormEvent) => {
     event.preventDefault();
-    const patientName = walkInName.trim();
-    if (!patientName || !supabase) return;
-
-    const tokenNumber = `OPD-${Math.floor(100 + Math.random() * 900)}`;
-    const doctor = staffMembers.find((member) => member.staff_type === 'Doctor');
-    const payload = {
-      hospital_id: hospitalInfo.id,
-      hospital_name: hospitalInfo.name,
-      patient_name: patientName,
-      token_number: tokenNumber,
-      department: 'General Medicine',
-      doctor_name: doctor?.full_name || 'Chief Medical Officer',
-      doctor_id: doctor?.id || 'UNASSIGNED',
-      status: 'WAITING',
-      queue_status: 'WAITING',
-      source: 'hospital_dashboard_walkin',
-      appointment_date: new Date().toISOString().slice(0, 10),
-      created_at: new Date().toISOString(),
-    };
-
-    const { error } = await supabase.from('appointments').insert([payload]);
+    const patientName = opdForm.patientName.trim();
+    if (!patientName) return;
+    const tokenNum = `NX-OPD-${Math.floor(1000 + Math.random() * 9000)}`;
+    const doctorName = staffMembers.find((s) => s.staff_type === 'Doctor')?.full_name || 'Duty Medical Officer';
+    const error = await insertFirst([
+      {
+        table: 'hospital_opd_queue',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          hospital_name: hospitalInfo.name,
+          token_number: tokenNum,
+          uhid: tokenNum,
+          patient_name: patientName,
+          phone: opdForm.phone.trim() || null,
+          department: opdForm.department,
+          doctor_name: doctorName,
+          status: 'WAITING',
+          source: 'hospital_walkin',
+          appointment_date: new Date().toISOString().slice(0, 10),
+        },
+      },
+      {
+        table: 'appointments',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          token_number: tokenNum,
+          uhid: tokenNum,
+          patient_name: patientName,
+          phone: opdForm.phone.trim() || null,
+          department: opdForm.department,
+          doctor_name: doctorName,
+          status: 'WAITING',
+          appointment_date: new Date().toISOString().slice(0, 10),
+        },
+      },
+    ]);
     if (error) {
-      await supabase.from('opd_queue').insert([payload]);
+      toast.error(error);
+      return;
     }
-    setWalkInName('');
-    setShowTokenModal(false);
-    toast.success(`Walk-in token ${tokenNumber} issued`);
-    void loadPlatformData(hospitalInfo);
+    toast.success(`Walk-in token ${tokenNum} created`);
+    setOpdForm({ patientName: '', department: 'General Medicine', phone: '' });
+    closeModal();
+    void loadPlatformData(hospitalInfo.id);
+  };
+
+  const handleAddMedicine = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!medForm.name.trim()) return;
+    const stock = Number(medForm.stock) || 0;
+    const itemName = medForm.name.trim();
+    const category = medForm.category.trim() || 'Medicine';
+    const error = await insertFirst([
+      {
+        table: 'hospital_pharmacy_inventory',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          item_name: itemName,
+          category,
+          stock,
+          status: stock > 0 ? 'In Stock' : 'Out of Stock',
+        },
+      },
+      {
+        table: 'inventory_items',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          item_name: itemName,
+          name: itemName,
+          category,
+          quantity_in_stock: stock,
+          status: stock > 0 ? 'In Stock' : 'Out of Stock',
+        },
+      },
+    ]);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    toast.success('Medicine added to formulary');
+    setMedForm({ name: '', category: 'Medicine', stock: 100 });
+    closeModal();
+    void loadPlatformData(hospitalInfo.id);
+  };
+
+  const handleAddBed = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!bedForm.bedNumber.trim()) return;
+    const occupied = Boolean(bedForm.patientName.trim());
+    const error = await insertFirst([
+      {
+        table: 'hospital_beds',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          ward: bedForm.ward,
+          ward_name: bedForm.ward,
+          bed_number: bedForm.bedNumber.trim(),
+          status: occupied ? 'Occupied' : 'Available',
+          is_occupied: occupied,
+          patient_name: occupied ? bedForm.patientName.trim() : null,
+        },
+      },
+    ]);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    toast.success('Bed registered');
+    setBedForm({ ward: 'General Ward', bedNumber: '', patientName: '' });
+    closeModal();
+    void loadPlatformData(hospitalInfo.id);
+  };
+
+  const handleAddInvoice = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!invoiceForm.patientName.trim()) return;
+    const amount = Number(invoiceForm.amount) || 0;
+    const error = await insertFirst([
+      {
+        table: 'hospital_invoices',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          invoice_number: `INV-${Date.now()}`,
+          patient_name: invoiceForm.patientName.trim(),
+          service_type: invoiceForm.service,
+          amount,
+          status: 'unpaid',
+        },
+      },
+      {
+        table: 'bills',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          patient_name: invoiceForm.patientName.trim(),
+          bill_type: invoiceForm.service,
+          total_amount: amount,
+          invoice_number: `INV-${Date.now()}`,
+          status: 'unpaid',
+        },
+      },
+    ]);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    toast.success('Invoice posted');
+    setInvoiceForm({ patientName: '', service: 'OPD Consultation', amount: 800 });
+    closeModal();
+    void loadPlatformData(hospitalInfo.id);
+  };
+
+  const handleAddSupply = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!supplyForm.vendor.trim() || !supplyForm.item.trim()) return;
+    const error = await insertFirst([
+      {
+        table: 'hospital_supply_orders',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          po_number: `PO-${Date.now()}`,
+          vendor_name: supplyForm.vendor.trim(),
+          item_description: supplyForm.item.trim(),
+          quantity: Number(supplyForm.quantity) || 1,
+          total_amount: Number(supplyForm.amount) || 0,
+          status: 'ISSUED',
+        },
+      },
+      {
+        table: 'purchase_orders',
+        payload: {
+          hospital_id: hospitalInfo.id,
+          hospital_name: hospitalInfo.name,
+          po_number: `PO-${Date.now()}`,
+          vendor_name: supplyForm.vendor.trim(),
+          item_details: supplyForm.item.trim(),
+          quantity_ordered: Number(supplyForm.quantity) || 1,
+          total_amount: Number(supplyForm.amount) || 0,
+          status: 'ISSUED',
+        },
+      },
+    ]);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    toast.success('Purchase order issued');
+    setSupplyForm({ vendor: '', item: '', quantity: 1, amount: 0 });
+    closeModal();
+    void loadPlatformData(hospitalInfo.id);
   };
 
   const handleLogout = () => {
@@ -631,15 +597,30 @@ export default function RegalHospitalApp() {
     router.push(role === 'Admin' ? '/admin/login' : '/staff/login');
   };
 
+  const doctorCount = staffMembers.filter((s) => s.staff_type === 'Doctor').length;
+  const occupiedBeds = beds.filter((b) => /occup/i.test(b.status)).length;
+  const occupancyRate = beds.length > 0 ? Math.round((occupiedBeds / beds.length) * 100) : 0;
+  const totalCollections = invoices.reduce((sum, inv) => sum + inv.amount, 0);
+  const outstanding = invoices.filter((inv) => !/paid|settled/i.test(inv.status)).reduce((sum, inv) => sum + inv.amount, 0);
+
+  const navLinks: Array<{ id: NavModule; label: string; icon: typeof LayoutGrid; badge?: number }> = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
+    { id: 'smartq', label: 'SmartQ OPD', icon: ListOrdered, badge: opdQueue.length },
+    { id: 'patients', label: 'Patients', icon: Users, badge: opdQueue.length },
+    { id: 'ipd', label: 'IPD & Bed Census', icon: BedDouble, badge: beds.length },
+    { id: 'pharmacy', label: 'Records & Pharmacy', icon: ClipboardCheck, badge: pharmacyItems.length },
+    { id: 'emergency', label: 'Emergency Desk', icon: AlertTriangle, badge: emergencies.length },
+    { id: 'billing', label: 'Billing & Cashier', icon: IndianRupee, badge: invoices.length },
+    { id: 'supply', label: 'Supply & Orders', icon: PackageCheck, badge: supplyOrders.length },
+    { id: 'staff', label: 'Doctors & Staff', icon: HeartHandshake, badge: staffMembers.length },
+  ];
+
   const sidebar = (
     <>
       <div className="p-5 overflow-y-auto">
-        <div className="text-[11px] font-extrabold uppercase tracking-widest text-[#2dd4bf] font-mono">
-          HOSPITAL APP
-        </div>
+        <div className="text-[11px] font-extrabold uppercase tracking-widest text-[#2dd4bf] font-mono">HOSPITAL APP</div>
         <h1 className="text-lg font-black text-white tracking-tight leading-tight mt-0.5">{hospitalInfo.name}</h1>
         <div className="text-[11px] font-mono text-cyan-300/80 font-bold mt-0.5">{hospitalInfo.nodeCode}</div>
-
         <nav className="mt-6 space-y-1">
           {navLinks.map((item) => {
             const Icon = item.icon;
@@ -648,27 +629,20 @@ export default function RegalHospitalApp() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => openModule(item.id)}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  setMobileNavOpen(false);
+                }}
                 className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                  isActive
-                    ? 'bg-[#18537a] text-white shadow-md font-bold'
-                    : 'text-slate-300 hover:text-white hover:bg-[#0e3b5b]/60'
+                  isActive ? 'bg-[#18537a] text-white shadow-md font-bold' : 'text-slate-300 hover:text-white hover:bg-[#0e3b5b]/60'
                 }`}
               >
                 <div className="flex items-center gap-3">
                   <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-300' : 'text-slate-400'}`} />
                   <span>{item.label}</span>
                 </div>
-                {item.badge !== undefined && (
-                  <span
-                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold ${
-                      item.badgeColor && item.badge > 0
-                        ? `${item.badgeColor} text-white`
-                        : isActive
-                          ? 'bg-cyan-400 text-slate-950'
-                          : 'bg-[#144466] text-cyan-200'
-                    }`}
-                  >
+                {Boolean(item.badge) && (
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold ${isActive ? 'bg-cyan-400 text-slate-950' : 'bg-[#144466] text-cyan-200'}`}>
                     {item.badge}
                   </span>
                 )}
@@ -677,18 +651,12 @@ export default function RegalHospitalApp() {
           })}
         </nav>
       </div>
-
       <div className="p-4 border-t border-[#124263] bg-[#07253a] flex items-center justify-between">
         <div className="truncate pr-2">
           <div className="text-xs font-bold text-white truncate">{hospitalInfo.adminName}</div>
           <div className="text-[10px] text-cyan-300/70 truncate">{hospitalInfo.adminEmail}</div>
         </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-[#0e3b5b] transition cursor-pointer"
-          title="Log Out"
-        >
+        <button type="button" onClick={handleLogout} className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-[#0e3b5b]" title="Log Out">
           <LogOut className="w-4 h-4" />
         </button>
       </div>
@@ -698,10 +666,7 @@ export default function RegalHospitalApp() {
   if (isVerifying) {
     return (
       <div className="min-h-screen bg-[#f1f5f9] flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-slate-500">
-          <Loader2 className="w-8 h-8 animate-spin text-cyan-700" />
-          <p className="text-xs font-semibold">Opening hospital command suite...</p>
-        </div>
+        <Loader2 className="w-8 h-8 animate-spin text-cyan-700" />
       </div>
     );
   }
@@ -715,57 +680,38 @@ export default function RegalHospitalApp() {
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
           <button type="button" className="absolute inset-0 bg-slate-950/50" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />
-          <aside className="relative z-50 h-full w-64 bg-[#0a2e47] text-slate-200 flex flex-col justify-between shadow-2xl">
-            {sidebar}
-          </aside>
+          <aside className="relative z-50 h-full w-64 bg-[#0a2e47] text-slate-200 flex flex-col justify-between">{sidebar}</aside>
         </div>
       )}
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden">
-        <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-2xs">
+        <header className="bg-white border-b border-slate-200 px-6 sm:px-8 py-4 flex items-center justify-between shrink-0 shadow-xs">
           <div className="flex items-center gap-3">
-            <button type="button" onClick={() => setMobileNavOpen(true)} className="md:hidden p-2 rounded-xl border border-slate-200" aria-label="Open modules">
+            <button type="button" className="md:hidden p-2 rounded-xl border border-slate-200" onClick={() => setMobileNavOpen(true)} aria-label="Open modules">
               <Menu className="w-4 h-4" />
             </button>
-            <div className="p-2 rounded-xl bg-cyan-50 border border-cyan-200 text-[#0c314b]">
+            <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-[#0c314b]">
               <Building2 className="w-5 h-5" />
             </div>
             <div>
               <h2 className="text-base font-black text-slate-900 leading-tight">
-                {navLinks.find((nav) => nav.id === activeTab)?.label} Command Center
+                {navLinks.find((n) => n.id === activeTab)?.label} Command Center
               </h2>
-              <p className="text-xs text-slate-500 font-medium">
-                Active Node:{' '}
-                <span className="font-mono text-cyan-800 font-bold">
-                  {hospitalInfo.id} ({hospitalInfo.name})
-                </span>
+              <p className="text-xs text-slate-500">
+                Active Node: <span className="font-mono text-cyan-800 font-bold">{hospitalInfo.id} ({hospitalInfo.name})</span>
               </p>
             </div>
           </div>
-
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setShowTokenModal(true)}
-              className="hidden sm:inline-flex px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold items-center gap-2"
-            >
+            <button type="button" onClick={() => setActiveModal('opd')} className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2">
               <Plus className="w-4 h-4" />
               Issue OPD Token
             </button>
-            <button
-              type="button"
-              onClick={() => router.push('/dashboard/staff-credentials')}
-              className="px-3.5 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2 shadow-xs transition cursor-pointer"
-            >
+            <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2">
               <Plus className="w-4 h-4" />
-              <span>Provision Staff</span>
+              Provision Staff
             </button>
-            <button
-              type="button"
-              onClick={() => void loadPlatformData(hospitalInfo)}
-              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition cursor-pointer"
-              title="Sync Platform State"
-            >
+            <button type="button" onClick={() => void loadPlatformData(hospitalInfo.id)} className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50">
               <RefreshCw className={`w-4 h-4 text-cyan-600 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
@@ -776,183 +722,95 @@ export default function RegalHospitalApp() {
             <div className="space-y-6">
               <div>
                 <h3 className="text-lg font-black text-slate-900">Facility Operations Snapshot</h3>
-                <p className="text-xs text-slate-500">Live census across OPD, IPD, pharmacy, billing, and vendor supply.</p>
+                <p className="text-xs text-slate-500">Live census scoped to {hospitalInfo.id}. Empty modules stay empty until real records exist.</p>
               </div>
-
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                <button type="button" onClick={() => openModule('smartq')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                <button type="button" onClick={() => setActiveTab('smartq')} className="bg-white rounded-2xl p-5 border border-slate-200 text-left">
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">LIVE OPD QUEUE</div>
                   <div className="text-3xl font-black text-slate-900 mt-2">{opdQueue.length}</div>
-                  <div className="text-xs font-medium text-cyan-700 mt-1">{waitingCount} waiting in triage</div>
+                  <div className="text-xs font-medium text-cyan-700 mt-1">{opdQueue.length} waiting in triage</div>
                 </button>
-                <button type="button" onClick={() => openModule('staff')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                <button type="button" onClick={() => setActiveTab('staff')} className="bg-white rounded-2xl p-5 border border-slate-200 text-left">
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">PROVISIONED STAFF</div>
                   <div className="text-3xl font-black text-slate-900 mt-2">{staffMembers.length}</div>
-                  <div className="text-xs font-medium text-cyan-700 mt-1">{staffMembers.filter((s) => s.staff_type === 'Doctor').length} doctors verified</div>
+                  <div className="text-xs font-medium text-cyan-700 mt-1">{doctorCount} doctors verified</div>
                 </button>
-                <button type="button" onClick={() => openModule('ipd')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                <button type="button" onClick={() => setActiveTab('ipd')} className="bg-white rounded-2xl p-5 border border-slate-200 text-left">
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">BED OCCUPANCY</div>
                   <div className="text-3xl font-black text-slate-900 mt-2">{occupancyRate}%</div>
-                  <div className="text-xs font-medium text-cyan-700 mt-1">{occupiedBeds}/{bedCensus.length} occupied</div>
+                  <div className="text-xs font-medium text-cyan-700 mt-1">{occupiedBeds}/{beds.length} occupied</div>
                 </button>
-                <button type="button" onClick={() => openModule('billing')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                <button type="button" onClick={() => setActiveTab('billing')} className="bg-white rounded-2xl p-5 border border-slate-200 text-left">
                   <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">COLLECTIONS (₹)</div>
-                  <div className="text-3xl font-black text-slate-900 mt-2">{inr(collectedTotal)}</div>
-                  <div className="text-xs font-medium text-emerald-600 mt-1">{inr(unpaidTotal)} outstanding today</div>
+                  <div className="text-3xl font-black text-slate-900 mt-2">{inr(totalCollections)}</div>
+                  <div className="text-xs font-medium text-emerald-600 mt-1">{inr(outstanding)} outstanding</div>
                 </button>
               </div>
-
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <div className="lg:col-span-7 space-y-6">
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Activity className="w-4 h-4 text-cyan-700" />
-                        <h4 className="text-sm font-black text-slate-900">Live Outpatient Queue (SmartQ)</h4>
-                      </div>
-                      <button type="button" onClick={() => openModule('smartq')} className="text-[11px] font-mono font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200">
-                        Realtime Feed
-                      </button>
+                <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-cyan-700" />
+                      <h4 className="text-sm font-black text-slate-900">Recent Live Outpatients</h4>
                     </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead>
-                          <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400">
-                            <th className="py-2.5 px-3">Token</th>
-                            <th className="py-2.5 px-3">Patient</th>
-                            <th className="py-2.5 px-3">Department</th>
-                            <th className="py-2.5 px-3">Doctor</th>
-                            <th className="py-2.5 px-3">Status</th>
+                  </div>
+                  {opdQueue.length === 0 ? (
+                    <EmptyState icon={Users} title="No active OPD patients" body={`No appointments for ${hospitalInfo.id}. Issue a walk-in token to start.`} actionLabel="Issue OPD Token" onAction={() => setActiveModal('opd')} />
+                  ) : (
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400">
+                          <th className="py-2.5 px-3">Token</th>
+                          <th className="py-2.5 px-3">Patient</th>
+                          <th className="py-2.5 px-3">Dept</th>
+                          <th className="py-2.5 px-3">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {opdQueue.slice(0, 6).map((q) => (
+                          <tr key={q.id}>
+                            <td className="py-2.5 px-3 font-mono font-bold text-cyan-800">{q.token}</td>
+                            <td className="py-2.5 px-3 font-bold">{q.patient_name}</td>
+                            <td className="py-2.5 px-3">{q.department}</td>
+                            <td className="py-2.5 px-3">{q.status}</td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {opdQueue.slice(0, 8).map((item) => (
-                            <tr key={item.id} className="hover:bg-slate-50 transition">
-                              <td className="py-3 px-3 font-mono font-black text-cyan-800">{item.token}</td>
-                              <td className="py-3 px-3">
-                                <div className="font-bold text-slate-900">{item.patient_name}</div>
-                                <div className="text-[10px] text-slate-400">Age: {item.age} &bull; {item.time}</div>
-                              </td>
-                              <td className="py-3 px-3 text-slate-600">{item.department}</td>
-                              <td className="py-3 px-3 text-slate-700 font-medium">{item.doctor_name}</td>
-                              <td className="py-3 px-3">
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    /consult/i.test(item.status)
-                                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
-                                      : /vital/i.test(item.status)
-                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                  }`}
-                                >
-                                  {item.status}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <BedDouble className="w-4 h-4 text-cyan-700" />
-                        <h4 className="text-sm font-black text-slate-900">Inpatient Ward &amp; Bed Census</h4>
-                      </div>
-                      <button type="button" onClick={() => openModule('ipd')} className="text-[11px] font-mono text-slate-400">
-                        ICU &amp; General Units
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      {bedCensus.map((bed) => (
-                        <div key={bed.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between">
-                          <div>
-                            <div className="text-xs font-bold text-slate-900">{bed.ward} &bull; Bed {bed.bed}</div>
-                            <div className="text-[11px] text-slate-500 mt-0.5">
-                              {bed.status === 'Occupied' ? `Patient: ${bed.patient}` : 'Ready for admission'}
-                            </div>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            bed.status === 'Occupied'
-                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}>
-                            {bed.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
-
                 <div className="lg:col-span-5 space-y-6">
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-rose-600" />
-                        <h4 className="text-sm font-black text-slate-900">Emergency &amp; Triage Alerts</h4>
-                      </div>
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                        emergencyActive > 0
-                          ? 'text-rose-700 bg-rose-50 border-rose-200'
-                          : 'text-emerald-600 bg-emerald-50 border-emerald-200'
-                      }`}>
-                        {emergencyActive > 0 ? `${emergencyActive} Active` : 'Normal Flow'}
-                      </span>
-                    </div>
-                    <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-1">
-                      <div className="font-bold flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
-                        <span>Duty Medical Officer Assigned</span>
-                      </div>
-                      <p className="text-[11px] text-blue-700">
-                        Emergency Bay 1 and Trauma response are staffed. Real-time patient triage synchronized with Doctor Portal.
-                      </p>
-                    </div>
-                    {emergencyDesk.slice(0, 3).map((alert) => (
-                      <div key={alert.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-slate-900">{alert.patient_name}</span>
-                          <span className="text-[10px] font-bold text-rose-700">{alert.priority}</span>
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+                    <h4 className="text-sm font-black text-slate-900">Emergency Status</h4>
+                    {emergencies.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900">
+                        <div className="font-bold flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          Node {hospitalInfo.id} Ready
                         </div>
-                        <p className="text-[11px] text-slate-600 mt-1">{alert.complaint}</p>
+                        <p className="text-[11px] text-emerald-700 mt-1">No active red alerts for this hospital node.</p>
                       </div>
-                    ))}
+                    ) : (
+                      emergencies.slice(0, 3).map((alert) => (
+                        <div key={alert.id} className="p-3 rounded-xl border border-rose-200 bg-rose-50 text-xs">
+                          <div className="font-bold text-rose-800">{alert.patient_name} · {alert.priority}</div>
+                          <p className="text-rose-700">{alert.complaint}</p>
+                        </div>
+                      ))
+                    )}
                   </div>
-
-                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <PackageCheck className="w-4 h-4 text-cyan-700" />
-                        <h4 className="text-sm font-black text-slate-900">Vendor Supply Dispatches</h4>
-                      </div>
-                      <button type="button" onClick={() => openModule('supply')} className="text-[11px] font-bold text-cyan-700">
-                        {supplyOrders.length} In-Transit
-                      </button>
-                    </div>
-                    <div className="space-y-3">
-                      {supplyOrders.slice(0, 4).map((order) => (
-                        <div key={order.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
-                          <div className="flex items-center justify-between">
-                            <span className="font-mono font-bold text-xs text-cyan-800">{order.id}</span>
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-800">
-                              {order.status}
-                            </span>
-                          </div>
-                          <div className="text-xs font-bold text-slate-900">{order.item}</div>
-                          <div className="flex items-center justify-between text-[11px] text-slate-400">
-                            <span>{order.vendor}</span>
-                            <span className="font-bold text-slate-700">{order.amount}</span>
-                          </div>
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-3">
+                    <h4 className="text-sm font-black text-slate-900">Vendor Supply</h4>
+                    {supplyOrders.length === 0 ? (
+                      <EmptyState icon={PackageCheck} title="No purchase orders" body="No procurement records for this node." actionLabel="Create Purchase Order" onAction={() => setActiveModal('supply')} />
+                    ) : (
+                      supplyOrders.slice(0, 3).map((po) => (
+                        <div key={po.id} className="p-3 rounded-xl border border-slate-200 text-xs">
+                          <div className="font-mono font-bold text-cyan-800">{po.po_number}</div>
+                          <div className="font-bold text-slate-900">{po.item_description}</div>
+                          <div className="text-slate-500">{po.vendor_name} · {inr(po.total_amount)}</div>
                         </div>
-                      ))}
-                    </div>
-                    {pharmacyItems.length > 0 && (
-                      <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-500">
-                        Pharmacy health: {pharmacyItems.filter((item) => item.status === 'Low Stock').length} low-stock SKUs of {pharmacyItems.length} tracked.
-                      </div>
+                      ))
                     )}
                   </div>
                 </div>
@@ -960,284 +818,131 @@ export default function RegalHospitalApp() {
             </div>
           )}
 
-          {activeTab === 'smartq' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">SmartQ Outpatient Triage Registry</h3>
-                <p className="text-xs text-slate-500">Live feed from Patient bookings and Doctor Workspace consultation status.</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
-                  <div className="text-xs font-bold text-slate-400 uppercase">Waiting in Queue</div>
-                  <div className="text-3xl font-black text-cyan-800 mt-1">{waitingCount || opdQueue.length}</div>
-                  <div className="text-[11px] text-emerald-600 font-bold mt-1">Patient App bookings appear instantly</div>
+          {(activeTab === 'smartq' || activeTab === 'patients') && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Patient Registry &amp; SmartQ Queue</h3>
+                  <p className="text-xs text-slate-500">UHID records from Patient App bookings and walk-in OPD, scoped to {hospitalInfo.id}.</p>
                 </div>
-                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
-                  <div className="text-xs font-bold text-slate-400 uppercase">Consulting Now</div>
-                  <div className="text-3xl font-black text-blue-700 mt-1">{consultingCount}</div>
-                  <div className="text-[11px] text-blue-600 font-bold mt-1">Doctor Workspace in-progress notes</div>
-                </div>
-                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
-                  <div className="text-xs font-bold text-slate-400 uppercase">Completed Today</div>
-                  <div className="text-3xl font-black text-slate-800 mt-1">{completedCount}</div>
-                  <div className="text-[11px] text-slate-400 font-bold mt-1">Discharged or prescribed</div>
-                </div>
+                <button type="button" onClick={() => setActiveModal('opd')} className="px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /> Issue Token
+                </button>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-                {opdQueue.length === 0 ? (
-                  <div className="p-12 text-center text-sm text-slate-500">No live OPD tokens yet. Issue a walk-in or wait for Patient App bookings.</div>
-                ) : (
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
-                      <tr>
-                        <th className="py-3 px-4">Token</th>
-                        <th className="py-3 px-4">Patient</th>
-                        <th className="py-3 px-4">Department</th>
-                        <th className="py-3 px-4">Clinician</th>
-                        <th className="py-3 px-4">Notes</th>
-                        <th className="py-3 px-4">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {opdQueue.map((item) => (
-                        <tr key={item.id} className="hover:bg-cyan-50/40">
-                          <td className="py-3 px-4 font-mono font-black text-cyan-800">{item.token}</td>
-                          <td className="py-3 px-4 font-bold text-slate-900">{item.patient_name}</td>
-                          <td className="py-3 px-4">{item.department}</td>
-                          <td className="py-3 px-4">{item.doctor_name}</td>
-                          <td className="py-3 px-4 text-slate-500 max-w-[220px] truncate">{item.notes || '—'}</td>
-                          <td className="py-3 px-4">
-                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
-                              {item.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'patients' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Patient Registry</h3>
-                <p className="text-xs text-slate-500">UHID records synchronized from Patient App bookings and walk-in OPD.</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+              {opdQueue.length === 0 ? (
+                <EmptyState icon={Users} title="No Patient Records Found" body={`Waiting for live bookings scoped strictly to ${hospitalInfo.name} (${hospitalInfo.id}).`} actionLabel="Issue First Token" onAction={() => setActiveModal('opd')} />
+              ) : (
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                  <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase">
                     <tr>
                       <th className="py-3 px-4">UHID / Token</th>
                       <th className="py-3 px-4">Patient</th>
                       <th className="py-3 px-4">Department</th>
                       <th className="py-3 px-4">Phone</th>
-                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4 text-right">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {patientRegistry.map((patient) => (
-                      <tr key={patient.id}>
-                        <td className="py-3 px-4 font-mono font-bold text-cyan-800">{patient.uhid}</td>
-                        <td className="py-3 px-4 font-bold">{patient.name}</td>
-                        <td className="py-3 px-4">{patient.department}</td>
-                        <td className="py-3 px-4 font-mono">{patient.phone}</td>
-                        <td className="py-3 px-4">{patient.status}</td>
+                    {opdQueue.map((p) => (
+                      <tr key={p.id}>
+                        <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">{p.token}</td>
+                        <td className="py-3.5 px-4 font-bold">{p.patient_name}</td>
+                        <td className="py-3.5 px-4">{p.department}</td>
+                        <td className="py-3.5 px-4 font-mono">{p.phone || '—'}</td>
+                        <td className="py-3.5 px-4 text-right">{p.status}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'ipd' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Ward &amp; Bed Allocation Census</h3>
-                <p className="text-xs text-slate-500">Real-time occupancy for ICU and general wards.</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {bedCensus.map((bed) => (
-                  <div key={bed.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-900">
-                        {bed.ward} ({bed.bed})
-                      </span>
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          bed.status === 'Occupied'
-                            ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        }`}
-                      >
-                        {bed.status}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      Patient: <strong className="text-slate-800">{bed.patient}</strong>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      Consultant: <strong className="text-slate-800">{bed.doc}</strong>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           )}
 
           {activeTab === 'pharmacy' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Records &amp; Pharmacy Formulary</h3>
-                <p className="text-xs text-slate-500">Inventory and e-prescriptions shared with Doctor Workspace.</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-                {pharmacyItems.length === 0 ? (
-                  <div className="p-12 text-center text-sm text-slate-500">No inventory rows yet. Vendor receipts will populate this formulary.</div>
-                ) : (
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
-                      <tr>
-                        <th className="py-3 px-4">Item</th>
-                        <th className="py-3 px-4">Category</th>
-                        <th className="py-3 px-4">Stock</th>
-                        <th className="py-3 px-4">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {pharmacyItems.map((item) => (
-                        <tr key={item.id}>
-                          <td className="py-3 px-4 font-bold">{item.name}</td>
-                          <td className="py-3 px-4">{item.category}</td>
-                          <td className="py-3 px-4 font-mono">{item.stock}</td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${item.status === 'Low Stock' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
-                              {item.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'labs' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Diagnostics &amp; Labs</h3>
-                <p className="text-xs text-slate-500">Clinical notes and diagnostic orders from Doctor consultations.</p>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-                {labOrders.length === 0 ? (
-                  <div className="p-12 text-center text-sm text-slate-500">No diagnostic notes yet. They appear when clinicians save consultation records.</div>
-                ) : (
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
-                      <tr>
-                        <th className="py-3 px-4">Patient</th>
-                        <th className="py-3 px-4">Order / Finding</th>
-                        <th className="py-3 px-4">Clinician</th>
-                        <th className="py-3 px-4">Updated</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {labOrders.map((lab) => (
-                        <tr key={lab.id}>
-                          <td className="py-3 px-4 font-bold">{lab.patient_name}</td>
-                          <td className="py-3 px-4">{lab.test}</td>
-                          <td className="py-3 px-4">{lab.doctor_name}</td>
-                          <td className="py-3 px-4 font-mono text-slate-500">{lab.time}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'emergency' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Emergency Desk</h3>
-                <p className="text-xs text-slate-500">P1–P3 triage board synchronized with Doctor emergency bypass.</p>
-              </div>
-              {emergencyDesk.length === 0 ? (
-                <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
-                  No active emergency triages.
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Records &amp; Pharmacy Formulary</h3>
+                  <p className="text-xs text-slate-500">Live inventory for {hospitalInfo.name}. No placeholder SKUs.</p>
                 </div>
+                <button type="button" onClick={() => setActiveModal('pharmacy')} className="px-3.5 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /> Add Formulary Item
+                </button>
+              </div>
+              {pharmacyItems.length === 0 ? (
+                <EmptyState icon={Pill} title="Formulary Empty" body={`No medicines stocked for ${hospitalInfo.name}. Add the first formulary item.`} actionLabel="Add Formulary Item" onAction={() => setActiveModal('pharmacy')} />
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {emergencyDesk.map((item) => (
-                    <div key={item.id} className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-black text-slate-900">{item.patient_name}</span>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${item.priority === 'P1' ? 'bg-rose-100 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
-                          {item.priority}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-600">{item.complaint}</p>
-                      <div className="flex items-center justify-between text-[11px] text-slate-400">
-                        <span>{item.status}</span>
-                        <span className="font-mono">{item.time}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase">
+                    <tr>
+                      <th className="py-3 px-4">Item</th>
+                      <th className="py-3 px-4">Category</th>
+                      <th className="py-3 px-4">Stock</th>
+                      <th className="py-3 px-4 text-right">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pharmacyItems.map((med) => (
+                      <tr key={med.id}>
+                        <td className="py-3.5 px-4 font-bold">{med.item_name}</td>
+                        <td className="py-3.5 px-4">{med.category}</td>
+                        <td className="py-3.5 px-4 font-mono">{med.stock}</td>
+                        <td className="py-3.5 px-4 text-right">{med.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
             </div>
           )}
 
           {activeTab === 'billing' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Billing &amp; Cashier</h3>
-                <p className="text-xs text-slate-500">Consultation invoices and pharmacy charges in INR, linked to OPD encounters.</p>
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Billing &amp; Cashier</h3>
+                  <p className="text-xs text-slate-500">Invoices in INR, scoped to {hospitalInfo.id}.</p>
+                </div>
+                <button type="button" onClick={() => setActiveModal('invoice')} className="px-3.5 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /> Add Invoice
+                </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-5 bg-white rounded-2xl border border-slate-200">
-                  <div className="text-xs font-bold text-slate-400 uppercase">Gross Collections</div>
-                  <div className="text-2xl font-black text-slate-900 mt-1">{inr(collectedTotal)}</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                <div className="bg-white rounded-2xl p-5 border border-slate-200">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase font-mono">Gross Collections</div>
+                  <div className="text-3xl font-black mt-2">{inr(totalCollections)}</div>
                 </div>
-                <div className="p-5 bg-white rounded-2xl border border-slate-200">
-                  <div className="text-xs font-bold text-slate-400 uppercase">Outstanding</div>
-                  <div className="text-2xl font-black text-amber-700 mt-1">{inr(unpaidTotal)}</div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase font-mono">Outstanding</div>
+                  <div className="text-3xl font-black mt-2">{inr(outstanding)}</div>
                 </div>
-                <div className="p-5 bg-white rounded-2xl border border-slate-200">
-                  <div className="text-xs font-bold text-slate-400 uppercase">Invoices</div>
-                  <div className="text-2xl font-black text-cyan-800 mt-1">{bills.length}</div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase font-mono">Invoices</div>
+                  <div className="text-3xl font-black mt-2">{invoices.length}</div>
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                {bills.length === 0 ? (
-                  <div className="p-12 text-center text-sm text-slate-500">No invoices yet. They post when consultations complete.</div>
+              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                {invoices.length === 0 ? (
+                  <EmptyState icon={IndianRupee} title="No invoices yet" body="They post when you add a cashier invoice or when a consultation is billed." actionLabel="Add Invoice" onAction={() => setActiveModal('invoice')} />
                 ) : (
                   <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                    <thead className="text-[10px] font-black uppercase text-slate-400">
                       <tr>
-                        <th className="py-3 px-4">Invoice</th>
-                        <th className="py-3 px-4">Patient</th>
-                        <th className="py-3 px-4">Consult</th>
-                        <th className="py-3 px-4">Pharmacy</th>
-                        <th className="py-3 px-4">Total</th>
-                        <th className="py-3 px-4">Status</th>
+                        <th className="py-2.5 px-3">Invoice</th>
+                        <th className="py-2.5 px-3">Patient</th>
+                        <th className="py-2.5 px-3">Service</th>
+                        <th className="py-2.5 px-3">Amount</th>
+                        <th className="py-2.5 px-3 text-right">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {bills.map((bill) => (
-                        <tr key={bill.id}>
-                          <td className="py-3 px-4 font-mono font-bold text-cyan-800">{bill.invoice}</td>
-                          <td className="py-3 px-4 font-bold">{bill.patient_name}</td>
-                          <td className="py-3 px-4">{inr(bill.consultation)}</td>
-                          <td className="py-3 px-4">{inr(bill.pharmacy)}</td>
-                          <td className="py-3 px-4 font-black">{inr(bill.total)}</td>
-                          <td className="py-3 px-4">{bill.status}</td>
+                      {invoices.map((inv) => (
+                        <tr key={inv.id}>
+                          <td className="py-2.5 px-3 font-mono font-bold text-cyan-800">{inv.id}</td>
+                          <td className="py-2.5 px-3 font-bold">{inv.patient_name}</td>
+                          <td className="py-2.5 px-3">{inv.service_type}</td>
+                          <td className="py-2.5 px-3">{inr(inv.amount)}</td>
+                          <td className="py-2.5 px-3 text-right">{inv.status}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1248,157 +953,145 @@ export default function RegalHospitalApp() {
           )}
 
           {activeTab === 'supply' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Procurement &amp; Vendor Dispatch</h3>
-                <p className="text-xs text-slate-500">Hospital purchase requests update when vendors acknowledge or fulfill in the Vendor Portal.</p>
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Procurement &amp; Vendor Dispatch</h3>
+                  <p className="text-xs text-slate-500">Purchase requests scoped to {hospitalInfo.id}.</p>
+                </div>
+                <button type="button" onClick={() => setActiveModal('supply')} className="px-3.5 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /> Create Purchase Order
+                </button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {supplyOrders.map((ord) => (
-                  <div key={ord.id} className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs font-bold text-cyan-800">{ord.id}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
-                        {ord.status}
+              {supplyOrders.length === 0 ? (
+                <EmptyState icon={PackageCheck} title="No Purchase Orders Issued" body="All placeholder orders are purged. Issue a PO to stock this node." actionLabel="Create Purchase Order" onAction={() => setActiveModal('supply')} />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {supplyOrders.map((po) => (
+                    <div key={po.id} className="p-5 rounded-2xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono text-xs font-bold text-cyan-800">{po.po_number}</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-700">{po.status}</span>
+                      </div>
+                      <div className="font-bold text-sm">{po.item_description}</div>
+                      <div className="text-xs text-slate-500">{po.vendor_name}</div>
+                      <div className="pt-2 border-t border-slate-100 flex justify-between text-xs">
+                        <span className="font-mono font-bold">{inr(po.total_amount)}</span>
+                        <span className="text-slate-400">Qty: {po.quantity}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'ipd' && (
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">IPD &amp; Bed Census</h3>
+                  <p className="text-xs text-slate-500">Ward allocations registered for {hospitalInfo.name}.</p>
+                </div>
+                <button type="button" onClick={() => setActiveModal('bed')} className="px-3.5 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5">
+                  <Plus className="w-3.5 h-3.5" /> Register Bed
+                </button>
+              </div>
+              {beds.length === 0 ? (
+                <EmptyState icon={BedDouble} title="No Beds Registered" body="Zero mock beds. Register the first ward allocation for this hospital node." actionLabel="Register Bed" onAction={() => setActiveModal('bed')} />
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {beds.map((b) => (
+                    <div key={b.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between">
+                      <div>
+                        <div className="text-xs font-bold">{b.ward_name} &bull; Bed {b.bed_number}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {/occup/i.test(b.status) ? `Patient: ${b.patient_name}` : 'Available for admission'}
+                        </div>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${/occup/i.test(b.status) ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                        {b.status}
                       </span>
                     </div>
-                    <div>
-                      <div className="font-bold text-slate-900 text-sm">{ord.item}</div>
-                      <div className="text-xs text-slate-500">{ord.vendor}</div>
-                    </div>
-                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                      <span className="text-xs font-mono font-bold text-slate-800">{ord.amount}</span>
-                      <span className="text-[10px] text-slate-400 font-mono">{ord.time}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {activeTab === 'staff' && (
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-lg font-black text-slate-900">Hospital Staff Directory</h3>
-                  <p className="text-xs text-slate-500">
-                    Facility personnel, active rosters, and access clearances.
-                  </p>
+                  <p className="text-xs text-slate-500">Active roster for {hospitalInfo.name}.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboard/staff-credentials')}
-                  className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition"
-                >
+                <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-2">
                   <Plus className="w-4 h-4" />
-                  <span>Add Staff Credential</span>
+                  Add Staff Credential
                 </button>
               </div>
-
               {currentUserRole !== 'Admin' ? (
-                <div className="p-10 bg-white rounded-2xl border border-slate-200 text-center space-y-3 shadow-xs">
+                <div className="p-10 bg-white rounded-2xl border border-slate-200 text-center space-y-3">
                   <div className="p-3 bg-cyan-50 text-cyan-700 rounded-full w-fit mx-auto border border-cyan-200">
                     <ShieldCheck className="w-6 h-6" />
                   </div>
-                  <h4 className="text-sm font-bold text-slate-900">Credential Keyring Restricted</h4>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
-                    You are currently logged in with <span className="font-semibold text-slate-700">{currentUserRole}</span> clearance.
-                    You may provision new staff accounts, but existing security passcodes and master identifiers are restricted to Hospital Administrators.
+                  <h4 className="text-sm font-bold">Credential Keyring Restricted</h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Logged in as {currentUserRole}. You may provision new staff, but existing passcodes are visible only to Hospital Administrators.
                   </p>
                 </div>
+              ) : staffMembers.length === 0 ? (
+                <EmptyState icon={HeartHandshake} title="No staff provisioned" body="Add the first clinician or support credential for this node." actionLabel="Add Staff Credential" onAction={() => router.push('/dashboard/staff-credentials')} />
               ) : (
-                <>
-                  <div className="relative w-full sm:w-72 ml-auto">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search doctor, staff or department..."
-                      className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-cyan-600"
-                    />
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                          <tr>
-                            <th className="py-3 px-4">Staff Member &amp; ID</th>
-                            <th className="py-3 px-4">Department &amp; Role</th>
-                            <th className="py-3 px-4">Login Email</th>
-                            <th className="py-3 px-4">Passcode Key</th>
-                            <th className="py-3 px-4">Workspace Target</th>
-                            <th className="py-3 px-4 text-right">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {filteredStaff.map((member) => (
-                            <tr key={member.id} className="hover:bg-cyan-50/40 transition">
-                              <td className="py-3.5 px-4">
-                                <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 mr-2">
-                                  {member.id}
-                                </span>
-                                <span className="font-bold text-slate-900">{member.full_name}</span>
-                              </td>
-                              <td className="py-3.5 px-4 text-slate-600">
-                                <span className="font-semibold text-slate-800">{member.staff_type}</span>
-                                <span className="text-slate-400 block text-[11px]">{member.department}</span>
-                              </td>
-                              <td className="py-3.5 px-4 font-mono text-slate-600">{member.email}</td>
-                              <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">
-                                <button
-                                  type="button"
-                                  className="inline-flex items-center gap-1"
-                                  onClick={() => {
-                                    if (member.temporary_passcode) {
-                                      void navigator.clipboard.writeText(member.temporary_passcode);
-                                      toast.success('Passcode copied');
-                                    }
-                                  }}
-                                >
-                                  {member.temporary_passcode || '—'}
-                                  <Copy className="w-3 h-3 text-slate-400" />
-                                </button>
-                              </td>
-                              <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500">{member.portal_access}</td>
-                              <td className="py-3.5 px-4 text-right">
-                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  {member.status || 'Active'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
+                <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase">
+                      <tr>
+                        <th className="py-3 px-4">Staff Member &amp; ID</th>
+                        <th className="py-3 px-4">Department &amp; Role</th>
+                        <th className="py-3 px-4">Email</th>
+                        <th className="py-3 px-4">Passcode Key</th>
+                        <th className="py-3 px-4 text-right">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {staffMembers.map((member) => (
+                        <tr key={member.id}>
+                          <td className="py-3.5 px-4 font-bold">
+                            <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 mr-2">{member.id}</span>
+                            {member.full_name}
+                          </td>
+                          <td className="py-3.5 px-4">{member.department} ({member.staff_type})</td>
+                          <td className="py-3.5 px-4 font-mono">{member.email}</td>
+                          <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">{member.temporary_passcode}</td>
+                          <td className="py-3.5 px-4 text-right">{member.status || 'Active'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           )}
 
-          {activeTab === 'messages' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-lg font-black text-slate-900">Ecosystem Messages</h3>
-                <p className="text-xs text-slate-500">Cross-app notifications from Doctor, Patient, and Vendor workspaces.</p>
-              </div>
-              {messages.length === 0 ? (
-                <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
-                  No ecosystem messages yet.
+          {activeTab === 'emergency' && (
+            <div className="p-8 bg-white rounded-2xl border border-slate-200 space-y-4">
+              <h3 className="text-lg font-black text-slate-900">Emergency Desk Command</h3>
+              <p className="text-xs text-slate-500">Trauma triage for {hospitalInfo.name} only.</p>
+              {emergencies.length === 0 ? (
+                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                  No active red alerts currently dispatched for {hospitalInfo.id}. Triage desk is on standby.
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {messages.map((message) => (
-                    <div key={message.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
-                      <div className="flex items-center justify-between gap-3">
-                        <h4 className="text-sm font-black text-slate-900">{message.title}</h4>
-                        <span className="text-[10px] font-mono text-slate-400">{message.time}</span>
+                <div className="grid gap-3">
+                  {emergencies.map((alert) => (
+                    <div key={alert.id} className="p-4 rounded-xl border border-rose-200 bg-rose-50">
+                      <div className="flex justify-between text-sm font-bold text-rose-800">
+                        <span>{alert.patient_name}</span>
+                        <span>{alert.priority}</span>
                       </div>
-                      <p className="text-xs text-slate-600 mt-1">{message.body}</p>
-                      <div className="mt-2 text-[10px] font-bold uppercase tracking-wider text-cyan-700">
-                        {message.from} → {message.target}
-                      </div>
+                      <p className="text-xs text-rose-700 mt-1">{alert.complaint}</p>
                     </div>
                   ))}
                 </div>
@@ -1408,26 +1101,72 @@ export default function RegalHospitalApp() {
         </div>
       </main>
 
-      {showTokenModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <form onSubmit={handleIssueToken} className="w-full max-w-md rounded-2xl bg-white p-6 space-y-4 border border-slate-200">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-black uppercase">Issue Walk-In OPD Token</h2>
-              <button type="button" onClick={() => setShowTokenModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
-                <X className="w-4 h-4" />
+      {activeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-bold text-slate-900">
+                {activeModal === 'opd' && 'Issue Walk-In OPD Token'}
+                {activeModal === 'pharmacy' && 'Add Medicine to Formulary'}
+                {activeModal === 'bed' && 'Register Ward Bed'}
+                {activeModal === 'invoice' && 'Post Cashier Invoice'}
+                {activeModal === 'supply' && 'Create Purchase Order'}
+              </h3>
+              <button type="button" onClick={closeModal} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
               </button>
             </div>
-            <input
-              required
-              value={walkInName}
-              onChange={(event) => setWalkInName(event.target.value)}
-              placeholder="Patient full name"
-              className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm"
-            />
-            <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 text-white text-xs font-black uppercase">
-              Confirm &amp; Issue Token
-            </button>
-          </form>
+
+            {activeModal === 'opd' && (
+              <form onSubmit={handleIssueToken} className="space-y-3 text-xs">
+                <input required value={opdForm.patientName} onChange={(e) => setOpdForm((p) => ({ ...p, patientName: e.target.value }))} placeholder="Patient full name" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input value={opdForm.department} onChange={(e) => setOpdForm((p) => ({ ...p, department: e.target.value }))} placeholder="Department" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input value={opdForm.phone} onChange={(e) => setOpdForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone (optional)" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <button type="submit" className="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-bold uppercase">Create Token</button>
+              </form>
+            )}
+
+            {activeModal === 'pharmacy' && (
+              <form onSubmit={handleAddMedicine} className="space-y-3 text-xs">
+                <input required value={medForm.name} onChange={(e) => setMedForm((p) => ({ ...p, name: e.target.value }))} placeholder="Medicine name" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input value={medForm.category} onChange={(e) => setMedForm((p) => ({ ...p, category: e.target.value }))} placeholder="Category" className="px-3 py-2.5 border border-slate-200 rounded-xl" />
+                  <input type="number" min={0} value={medForm.stock} onChange={(e) => setMedForm((p) => ({ ...p, stock: Number(e.target.value) }))} className="px-3 py-2.5 border border-slate-200 rounded-xl font-mono" />
+                </div>
+                <button type="submit" className="w-full py-2.5 rounded-xl bg-cyan-700 text-white font-bold uppercase">Save to Formulary</button>
+              </form>
+            )}
+
+            {activeModal === 'bed' && (
+              <form onSubmit={handleAddBed} className="space-y-3 text-xs">
+                <input required value={bedForm.ward} onChange={(e) => setBedForm((p) => ({ ...p, ward: e.target.value }))} placeholder="Ward name (ICU / General)" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input required value={bedForm.bedNumber} onChange={(e) => setBedForm((p) => ({ ...p, bedNumber: e.target.value }))} placeholder="Bed number" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input value={bedForm.patientName} onChange={(e) => setBedForm((p) => ({ ...p, patientName: e.target.value }))} placeholder="Occupying patient (optional)" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <button type="submit" className="w-full py-2.5 rounded-xl bg-cyan-700 text-white font-bold uppercase">Register Bed</button>
+              </form>
+            )}
+
+            {activeModal === 'invoice' && (
+              <form onSubmit={handleAddInvoice} className="space-y-3 text-xs">
+                <input required value={invoiceForm.patientName} onChange={(e) => setInvoiceForm((p) => ({ ...p, patientName: e.target.value }))} placeholder="Patient name" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input value={invoiceForm.service} onChange={(e) => setInvoiceForm((p) => ({ ...p, service: e.target.value }))} placeholder="Service type" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input type="number" min={0} value={invoiceForm.amount} onChange={(e) => setInvoiceForm((p) => ({ ...p, amount: Number(e.target.value) }))} className="w-full px-3 py-2.5 border border-slate-200 rounded-xl font-mono" />
+                <button type="submit" className="w-full py-2.5 rounded-xl bg-cyan-700 text-white font-bold uppercase">Post Invoice</button>
+              </form>
+            )}
+
+            {activeModal === 'supply' && (
+              <form onSubmit={handleAddSupply} className="space-y-3 text-xs">
+                <input required value={supplyForm.vendor} onChange={(e) => setSupplyForm((p) => ({ ...p, vendor: e.target.value }))} placeholder="Vendor name" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <input required value={supplyForm.item} onChange={(e) => setSupplyForm((p) => ({ ...p, item: e.target.value }))} placeholder="Item description" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="number" min={1} value={supplyForm.quantity} onChange={(e) => setSupplyForm((p) => ({ ...p, quantity: Number(e.target.value) }))} className="px-3 py-2.5 border border-slate-200 rounded-xl font-mono" />
+                  <input type="number" min={0} value={supplyForm.amount} onChange={(e) => setSupplyForm((p) => ({ ...p, amount: Number(e.target.value) }))} placeholder="Amount INR" className="px-3 py-2.5 border border-slate-200 rounded-xl font-mono" />
+                </div>
+                <button type="submit" className="w-full py-2.5 rounded-xl bg-cyan-700 text-white font-bold uppercase">Issue Purchase Order</button>
+              </form>
+            )}
+          </div>
         </div>
       )}
     </div>
