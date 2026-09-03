@@ -54,7 +54,7 @@ export function buildWhitelistedSuperAdminUser(
         ? existing.hospital_id
         : 'PLATFORM-00',
       hospital_name: existing.hospital_name || 'Regal Platform Root',
-      portal_access: '/super-admin/dashboard',
+      portal_access: '/super-vault-access',
       temporary_passcode: passcode.trim(),
     };
   }
@@ -71,7 +71,7 @@ export function buildWhitelistedSuperAdminUser(
     department: 'Platform Operations',
     email: cleanEmail,
     temporary_passcode: passcode.trim(),
-    portal_access: '/super-admin/dashboard',
+    portal_access: '/super-vault-access',
     status: 'Active',
   };
 }

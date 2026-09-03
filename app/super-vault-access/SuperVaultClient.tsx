@@ -53,7 +53,7 @@ const DEFAULT_VAULT_DATA: CredentialRecord[] = [
     role: 'Hospital Admin',
     identifier: 'hospital@curasync.com',
     passcode: 'Admin@123',
-    route: '/dashboard',
+    route: '/hospital/dashboard',
     env: 'Staging',
     notes: 'Regional facility master clearance'
   },

@@ -29,10 +29,16 @@ const VALID_PASSCODES = [
   'ADMIN-REGAL-2026',
 ];
 
+const SUPER_ADMIN_VAULT_ROUTE = '/super-vault-access';
+
 function PlatformRootConsoleForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirectUrl = searchParams.get('redirect') || '/super-admin/dashboard';
+  const redirectParam = searchParams.get('redirect');
+  const postAuthRoute =
+    redirectParam && redirectParam !== '/super-admin/dashboard'
+      ? redirectParam
+      : SUPER_ADMIN_VAULT_ROUTE;
 
   const [email, setEmail] = useState('aishwaryaananya43@gmail.com');
   const [passcode, setPasscode] = useState('');
@@ -46,11 +52,11 @@ function PlatformRootConsoleForm() {
       localStorage.getItem('nexora_superadmin_session') ||
       localStorage.getItem('curasync_superadmin_session');
     if (existing) {
-      router.replace(redirectUrl);
+      router.replace(postAuthRoute);
       return;
     }
     setReady(true);
-  }, [router, redirectUrl]);
+  }, [router, postAuthRoute]);
 
   const handleRootAuth = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -83,7 +89,7 @@ function PlatformRootConsoleForm() {
     setNexoraRoleCookie('super_admin');
 
     toast.success('Root Master Authentication Verified');
-    router.push(redirectUrl);
+    router.push(SUPER_ADMIN_VAULT_ROUTE);
     setLoading(false);
   };
 

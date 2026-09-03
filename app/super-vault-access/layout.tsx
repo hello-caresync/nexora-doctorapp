@@ -1,15 +1,12 @@
-import type { Metadata } from 'next';
+'use client';
 
-export const metadata: Metadata = {
-  title: 'Access Denied',
-  robots: {
-    index: false,
-    follow: false,
-    nocache: true,
-    googleBot: { index: false, follow: false },
-  },
-};
+import type { ReactNode } from 'react';
+import { EcosystemRouteGuard } from '@/components/auth/EcosystemRouteGuard';
 
-export default function SuperVaultLayout({ children }: { children: React.ReactNode }) {
-  return children;
+export default function SuperVaultAccessLayout({ children }: { children: ReactNode }) {
+  return (
+    <EcosystemRouteGuard role="superadmin" loginPath="/ops/platform-root">
+      {children}
+    </EcosystemRouteGuard>
+  );
 }
