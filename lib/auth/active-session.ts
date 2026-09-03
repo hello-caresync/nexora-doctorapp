@@ -47,9 +47,10 @@ export function persistActiveSession(session: ActiveStaffSession): void {
   const sessionPayload = JSON.stringify(session);
 
   localStorage.setItem(CURASYNC_ACTIVE_SESSION_KEY, sessionPayload);
+  localStorage.setItem('curasync_admin_session', sessionPayload);
   setNexoraRoleCookie('admin');
 
-  document.cookie = `curasync_admin_session=${encodeURIComponent(sessionPayload)}; ${attrs}`;
+  document.cookie = `curasync_admin_session=${encodeURIComponent(session.hospital_id)}; ${attrs}`;
   document.cookie = `curasync_active_session=${encodeURIComponent(sessionPayload)}; ${attrs}`;
 
   const cookiePayload = encodeURIComponent(

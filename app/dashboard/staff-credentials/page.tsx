@@ -45,7 +45,7 @@ interface StaffCredential {
 type ProvisionRole = 'Doctor' | 'Nurse' | 'Receptionist' | 'Pharmacist';
 
 function resolvePortalRoute(role: ProvisionRole): string {
-  if (role === 'Doctor') return '/doctor';
+  if (role === 'Doctor') return '/doctor/workspace';
   if (role === 'Receptionist') return '/staff/reception';
   if (role === 'Pharmacist') return '/staff/pharmacy';
   if (role === 'Nurse') return '/staff/nursing';
@@ -250,7 +250,7 @@ function StaffCredentialsContent() {
     setTimeout(() => setSuccessBanner(null), 4000);
   };
 
-  const handleFinishSetupAndEnterDashboard = () => {
+  const handleFinishSetupAndEnterDashboard = async () => {
     setValidationError(null);
 
     const doctorsCount = staffList.filter((s) => s.staff_type === 'Doctor').length;
@@ -263,7 +263,7 @@ function StaffCredentialsContent() {
       return;
     }
 
-    void markHospitalSetupCompleted(currentHospital.id);
+    await markHospitalSetupCompleted(currentHospital.id);
     router.replace('/dashboard');
   };
 

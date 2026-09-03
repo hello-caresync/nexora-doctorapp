@@ -67,6 +67,58 @@ export async function lookupHospitalDoctor(
   return { doctor: null, error: message };
 }
 
+async function lookupDoctorFromStaffCredentials(
+  identifier: string,
+  passcode: string,
+): Promise<DoctorAuthResult> {
+  const cleanEmail = identifier.trim().toLowerCase();
+  const cleanId = identifier.trim();
+
+  const { data: byEmail } = await supabase
+    .from('hospital_staff_credentials')
+    .select('*')
+    .eq('staff_type', 'Doctor')
+    .eq('email', cleanEmail)
+    .maybeSingle();
+
+  const { data: byId } = byEmail
+    ? { data: byEmail }
+    : await supabase
+        .from('hospital_staff_credentials')
+        .select('*')
+        .eq('staff_type', 'Doctor')
+        .eq('id', cleanId)
+        .maybeSingle();
+
+  const data = byEmail ?? byId;
+
+  if (!data) {
+    return { ok: false, error: 'Clinician ID or Email not found in hospital registry.' };
+  }
+
+  const row = data as Record<string, unknown>;
+  const stored = String(row.temporary_passcode ?? row.passcode ?? '');
+  const name = String(row.full_name ?? 'Clinician');
+
+  if (stored !== passcode) {
+    return { ok: false, error: `Invalid passcode for ${name}. Access denied.` };
+  }
+
+  const doctor: HospitalDoctorRow = {
+    doctor_id: String(row.id ?? cleanId),
+    doctor_name: name,
+    email: String(row.email ?? cleanEmail),
+    department: String(row.department ?? 'Clinical'),
+    specialization: String(row.department ?? 'Consultant Specialist'),
+    passcode: stored,
+    portal_route: '/doctor/workspace',
+    hospital_code: String(row.hospital_id ?? 'RH-BLR-01'),
+    is_active: String(row.status ?? 'Active') !== 'Restricted',
+  };
+
+  return { ok: true, doctor, session: buildSession(doctor) };
+}
+
 export async function authenticateHospitalDoctor(
   identifier: string,
   passcode: string,
@@ -83,10 +135,12 @@ export async function authenticateHospitalDoctor(
   }
 
   if (!doctor) {
-    return { ok: false, error: 'Clinician ID or Email not found in hospital registry.' };
+    return lookupDoctorFromStaffCredentials(identifier, cleanPass);
   }
 
   if (doctor.passcode !== cleanPass) {
+    const staffFallback = await lookupDoctorFromStaffCredentials(identifier, cleanPass);
+    if (staffFallback.ok) return staffFallback;
     return {
       ok: false,
       error: `Invalid passcode for ${doctor.doctor_name}. Access denied.`,

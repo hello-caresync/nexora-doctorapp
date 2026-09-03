@@ -53,7 +53,7 @@ export default function DoctorLoginPage() {
       saveDoctorSession(result.session, rememberMe);
 
       setTimeout(() => {
-        router.push('/doctor/dashboard');
+        router.push('/doctor/workspace');
       }, 500);
     } catch (err) {
       console.error('Login error:', err);

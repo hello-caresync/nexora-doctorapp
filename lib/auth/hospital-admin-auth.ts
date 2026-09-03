@@ -37,7 +37,7 @@ function normalizeAdmin(row: Record<string, unknown>, email: string): HospitalAd
     email: String(row.email ?? email).toLowerCase(),
     department: String(row.department ?? 'Hospital Administration'),
     temporary_passcode: readPasscode(row),
-    portal_access: String(row.portal_access ?? '/dashboard'),
+    portal_access: String(row.portal_access ?? '/dashboard/staff-credentials'),
     phone: typeof row.phone === 'string' ? row.phone : undefined,
   };
 }
@@ -61,44 +61,44 @@ export async function authenticateHospitalAdmin(
     return { ok: false, error: 'Authentication service unavailable.' };
   }
 
-  const adminTables = ['hospital_admins', 'hospital_staff_credentials'] as const;
+  const { data, error } = await supabase
+    .from('hospital_staff_credentials')
+    .select('*')
+    .eq('email', cleanEmail)
+    .maybeSingle();
 
-  for (const table of adminTables) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .eq('email', cleanEmail)
-      .maybeSingle();
-
-    if (error || !data) continue;
-
-    const row = data as Record<string, unknown>;
-    const staffType = String(row.staff_type ?? row.role ?? '');
-
-    if (table === 'hospital_staff_credentials' && staffType !== 'Admin') continue;
-
-    const storedPasscode = readPasscode(row);
-    if (storedPasscode !== cleanPasscode) {
-      return {
-        ok: false,
-        error: 'Invalid administrator credentials or unauthorized hospital node.',
-      };
-    }
-
-    const admin = normalizeAdmin(row, cleanEmail);
-
-    if (hospitalId && admin.hospital_id && admin.hospital_id !== hospitalId) {
-      return {
-        ok: false,
-        error: 'Invalid administrator credentials or unauthorized hospital node.',
-      };
-    }
-
-    return { ok: true, admin };
+  if (error || !data) {
+    return {
+      ok: false,
+      error: 'Invalid administrator credentials or unauthorized hospital node.',
+    };
   }
 
-  return {
-    ok: false,
-    error: 'Invalid administrator credentials or unauthorized hospital node.',
-  };
+  const row = data as Record<string, unknown>;
+  const staffType = String(row.staff_type ?? row.role ?? '');
+  if (staffType !== 'Admin') {
+    return {
+      ok: false,
+      error: 'Invalid administrator credentials or unauthorized hospital node.',
+    };
+  }
+
+  const storedPasscode = readPasscode(row);
+  if (storedPasscode !== cleanPasscode) {
+    return {
+      ok: false,
+      error: 'Invalid administrator credentials or passcode.',
+    };
+  }
+
+  const admin = normalizeAdmin(row, cleanEmail);
+
+  if (hospitalId && admin.hospital_id && admin.hospital_id !== hospitalId) {
+    return {
+      ok: false,
+      error: 'Invalid administrator credentials or unauthorized hospital node.',
+    };
+  }
+
+  return { ok: true, admin };
 }

@@ -64,7 +64,7 @@ function matchesScope(user: StaffCredentialRecord, scope: PortalAuthScope): bool
   if (scope === 'hospital_admin') {
     return user.staff_type === 'Admin' && !isSuperAdminCredential(user);
   }
-  return user.staff_type !== 'Admin' && !isSuperAdminCredential(user);
+  return ['Nurse', 'Receptionist', 'Pharmacist'].includes(user.staff_type);
 }
 
 async function lookupStaffByEmail(email: string): Promise<StaffCredentialRecord | null> {
@@ -164,6 +164,9 @@ export async function authenticatePortalCredential(params: {
     if (params.scope === 'hospital_admin') {
       return { ok: false, error: 'This account is not a Hospital Admin credential. Use the Staff portal.' };
     }
+    if (user.staff_type === 'Doctor') {
+      return { ok: false, error: 'Clinician accounts must sign in through the Doctor Portal.' };
+    }
     return {
       ok: false,
       error: 'Hospital Admin accounts must sign in through the Hospital Admin portal.',
@@ -195,6 +198,19 @@ export async function loadHospitalOptionsForLogin(): Promise<
   ];
 
   if (!supabase) return fallback;
+
+  const { data: hospitals } = await supabase
+    .from('hospitals')
+    .select('id, name, city')
+    .order('name', { ascending: true });
+
+  if (hospitals?.length) {
+    return hospitals.map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      location: String(row.city ?? 'Bengaluru'),
+    }));
+  }
 
   const { data: tenants } = await supabase
     .from('hospital_tenants')

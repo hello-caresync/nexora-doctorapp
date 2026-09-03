@@ -56,7 +56,9 @@ export function EcosystemRouteGuard({ role, children, loginPath }: RouteGuardPro
     switch (role) {
       case 'admin': {
         const session = parseActiveSession(localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY));
-        ok = Boolean(session && session.staff_type === 'Admin');
+        ok =
+          session?.staff_type === 'Admin' ||
+          parseActiveSession(localStorage.getItem('curasync_admin_session'))?.staff_type === 'Admin';
         break;
       }
       case 'staff':

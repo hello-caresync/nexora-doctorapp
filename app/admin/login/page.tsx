@@ -22,7 +22,7 @@ import {
   persistActiveSession,
   type ActiveStaffSession,
 } from '@/lib/auth/active-session';
-import { resolveAdminPostLoginRoute } from '@/lib/auth/admin-setup';
+import { isHospitalSetupCompleted, resolveAdminPostLoginRoute } from '@/lib/auth/admin-setup';
 import { authenticateHospitalAdmin } from '@/lib/auth/hospital-admin-auth';
 import { loadHospitalOptionsForLogin } from '@/lib/auth/staff-credential-auth';
 
@@ -108,8 +108,12 @@ function HospitalAdminLoginForm() {
 
       persistActiveSession(session);
 
-      const destination =
-        redirectUrl || (await resolveAdminPostLoginRoute(user.hospital_id));
+      const setupCompleted = await isHospitalSetupCompleted(user.hospital_id);
+      const destination = setupCompleted
+        ? redirectUrl && !redirectUrl.startsWith('/dashboard/staff-credentials')
+          ? redirectUrl
+          : '/dashboard'
+        : `/dashboard/staff-credentials?hospitalId=${encodeURIComponent(user.hospital_id)}`;
       router.push(destination);
     } catch (err: unknown) {
       setErrorMessage(

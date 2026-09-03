@@ -4,28 +4,22 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   Crown,
   Building2,
-  Stethoscope,
-  Users,
   Copy,
   Check,
   Eye,
   EyeOff,
   Search,
-  Filter,
   RefreshCw,
   Hospital,
-  Activity,
   PlusCircle,
   X,
   Sparkles,
   ShieldCheck,
-  ArrowRight,
   ArrowLeft,
   ChevronRight,
-  ShieldAlert,
-  UserCheck
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
+import { generateEnterprisePasscode } from '@/lib/generatePasscode';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -51,6 +45,32 @@ interface StaffCredential {
   portal_access: string;
   status: 'Active' | 'Restricted';
   created_at?: string;
+}
+
+function normalizeHospital(row: Record<string, unknown>): HospitalEntity {
+  return {
+    id: String(row.id ?? row.hospital_id ?? ''),
+    name: String(row.name ?? row.hospital_name ?? 'Hospital'),
+    city: String(row.city ?? 'Bengaluru'),
+    status: String(row.status ?? 'Active'),
+  };
+}
+
+function normalizeCredential(row: Record<string, unknown>): StaffCredential {
+  return {
+    id: String(row.id ?? ''),
+    hospital_id: String(row.hospital_id ?? ''),
+    hospital_name: String(row.hospital_name ?? ''),
+    full_name: String(row.full_name ?? ''),
+    staff_type: (row.staff_type as StaffCredential['staff_type']) ?? 'Admin',
+    department: String(row.department ?? ''),
+    email: String(row.email ?? ''),
+    temporary_passcode: String(row.temporary_passcode ?? row.passcode ?? ''),
+    phone: row.phone ? String(row.phone) : undefined,
+    portal_access: String(row.portal_access ?? '/dashboard'),
+    status: (row.status as StaffCredential['status']) ?? 'Active',
+    created_at: row.created_at ? String(row.created_at) : undefined,
+  };
 }
 
 export default function SuperAdminHospitalBlocksDashboard() {
@@ -84,13 +104,39 @@ export default function SuperAdminHospitalBlocksDashboard() {
     setIsLoading(true);
     if (supabase) {
       try {
-        const [hospRes, credRes] = await Promise.all([
+        const [hospRes, tenantRes, credRes] = await Promise.all([
           supabase.from('hospitals').select('*').order('id', { ascending: true }),
-          supabase.from('hospital_staff_credentials').select('*').order('created_at', { ascending: false })
+          supabase.from('hospital_tenants').select('*').order('hospital_id', { ascending: true }),
+          supabase.from('hospital_staff_credentials').select('*').order('created_at', { ascending: false }),
         ]);
 
-        if (hospRes.data) setHospitals(hospRes.data);
-        if (credRes.data) setCredentials(credRes.data);
+        const creds = (credRes.data ?? []).map((row) =>
+          normalizeCredential(row as Record<string, unknown>),
+        );
+        setCredentials(creds);
+
+        const fromHospitals = (hospRes.data ?? []).map((row) =>
+          normalizeHospital(row as Record<string, unknown>),
+        );
+        const fromTenants = (tenantRes.data ?? []).map((row) =>
+          normalizeHospital(row as Record<string, unknown>),
+        );
+
+        const map = new Map<string, HospitalEntity>();
+        [...fromHospitals, ...fromTenants].forEach((h) => {
+          if (h.id) map.set(h.id, h);
+        });
+        creds.forEach((c) => {
+          if (c.hospital_id && !map.has(c.hospital_id)) {
+            map.set(c.hospital_id, {
+              id: c.hospital_id,
+              name: c.hospital_name || c.hospital_id,
+              city: 'Bengaluru',
+              status: 'Active',
+            });
+          }
+        });
+        setHospitals(Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id)));
       } catch (err) {
         console.error('Error fetching data from Supabase:', err);
       }
@@ -104,8 +150,15 @@ export default function SuperAdminHospitalBlocksDashboard() {
     if (supabase) {
       const channel = supabase
         .channel('super_admin_blocks_realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'hospitals' }, () => loadPlatformData())
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_staff_credentials' }, () => loadPlatformData())
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hospitals' }, () => {
+          void loadPlatformData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_tenants' }, () => {
+          void loadPlatformData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_staff_credentials' }, () => {
+          void loadPlatformData();
+        })
         .subscribe();
 
       return () => {
@@ -116,18 +169,20 @@ export default function SuperAdminHospitalBlocksDashboard() {
 
   // Passcode Generator with Hospital Initials
   const generateDeterministicAdminPasscode = () => {
-    const cleanFirst = adminName.replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.)\s+/i, '').trim().split(/\s+/)[0] || 'Admin';
-    const firstInit = cleanFirst.charAt(0).toUpperCase();
-    const lastInit = adminName.trim().split(/\s+/).slice(-1)[0]?.charAt(0).toUpperCase() || 'X';
-
-    // Hospital Initials
-    const hospWords = newHospName.replace(/hospital|super|speciality|main|institute/gi, '').trim().split(/\s+/);
-    const hospInit = hospWords.map(w => w.charAt(0)).join('').slice(0, 3).toUpperCase() || 'HP';
-    
-    const nodeNum = newHospId.replace(/[^0-9]/g, '').slice(-1) || '1';
-    const nameLen = String(adminName.trim().length).padStart(2, '0');
-    
-    setAdminPasscode(`OPS-${hospInit}-${firstInit}${lastInit}26-A${nodeNum}${nameLen}`);
+    if (!adminName.trim()) {
+      setModalError('Please enter Admin Full Name before generating a passcode.');
+      return;
+    }
+    setModalError(null);
+    setAdminPasscode(
+      generateEnterprisePasscode(
+        'Admin',
+        'Hospital Administration',
+        adminName.trim(),
+        newHospId.trim().toUpperCase() || 'HOSP-01',
+        newHospName.trim() || 'Regal Hospital Main',
+      ),
+    );
   };
 
   const handleOnboardSubmit = async (e: React.FormEvent) => {
@@ -136,21 +191,44 @@ export default function SuperAdminHospitalBlocksDashboard() {
     setModalSubmitting(true);
 
     try {
-      if (supabase) {
-        // 1. Insert Hospital
+      if (!supabase) {
+        throw new Error('Supabase client unavailable.');
+      }
+
+      const hospitalId = newHospId.trim().toUpperCase();
         const { error: hospErr } = await supabase.from('hospitals').upsert({
-          id: newHospId.trim().toUpperCase(),
+          id: hospitalId,
           name: newHospName.trim(),
           city: newHospCity.trim(),
-          status: 'Active'
+          status: 'Active',
+          setup_completed: false,
         });
-        if (hospErr) throw hospErr;
+        if (hospErr) {
+          await supabase.from('hospital_tenants').upsert(
+            {
+              hospital_id: hospitalId,
+              hospital_name: newHospName.trim(),
+              city: newHospCity.trim(),
+              setup_completed: false,
+            },
+            { onConflict: 'hospital_id' },
+          );
+        } else {
+          await supabase.from('hospital_tenants').upsert(
+            {
+              hospital_id: hospitalId,
+              hospital_name: newHospName.trim(),
+              city: newHospCity.trim(),
+              setup_completed: false,
+            },
+            { onConflict: 'hospital_id' },
+          );
+        }
 
-        // 2. Insert Admin Credential
-        const adminId = `${newHospId.trim().toUpperCase()}-ADM01`;
+        const adminId = `${hospitalId}-ADM01`;
         const newAdminRecord: StaffCredential = {
           id: adminId,
-          hospital_id: newHospId.trim().toUpperCase(),
+          hospital_id: hospitalId,
           hospital_name: newHospName.trim(),
           full_name: adminName.trim(),
           staff_type: 'Admin',
@@ -163,7 +241,9 @@ export default function SuperAdminHospitalBlocksDashboard() {
           created_at: new Date().toISOString()
         };
 
-        const { error: credErr } = await supabase.from('hospital_staff_credentials').upsert(newAdminRecord);
+        const { error: credErr } = await supabase
+          .from('hospital_staff_credentials')
+          .upsert(newAdminRecord, { onConflict: 'email' });
         if (credErr) throw credErr;
 
         setCreatedPacket(newAdminRecord);
@@ -175,9 +255,8 @@ export default function SuperAdminHospitalBlocksDashboard() {
         setAdminName('');
         setAdminEmail('');
         setAdminPasscode('');
-      }
-    } catch (err: any) {
-      setModalError(err.message || 'Failed to onboard hospital.');
+    } catch (err: unknown) {
+      setModalError(err instanceof Error ? err.message : 'Failed to onboard hospital.');
     } finally {
       setModalSubmitting(false);
     }

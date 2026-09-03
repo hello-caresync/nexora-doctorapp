@@ -5,7 +5,7 @@ import { EcosystemRouteGuard } from '@/components/auth/EcosystemRouteGuard';
 
 export default function SuperVaultAccessLayout({ children }: { children: ReactNode }) {
   return (
-    <EcosystemRouteGuard role="superadmin" loginPath="/ops/platform-root">
+    <EcosystemRouteGuard role="superadmin" loginPath="/super-admin/login">
       {children}
     </EcosystemRouteGuard>
   );
