@@ -78,11 +78,13 @@ export function clearActiveSession(): void {
 
   localStorage.removeItem(CURASYNC_ACTIVE_SESSION_KEY);
   localStorage.removeItem('curasync_admin_session');
+  localStorage.removeItem('curasync_staff_session');
   clearNexoraRoleCookie();
 
   const attrs = 'path=/; max-age=0; SameSite=Lax';
   document.cookie = `curasync_admin_session=; ${attrs}`;
   document.cookie = `curasync_active_session=; ${attrs}`;
+  document.cookie = `curasync_staff_session=; ${attrs}`;
   document.cookie = `curasync_session=; ${attrs}`;
   document.cookie = `auth-token=; ${attrs}`;
   document.cookie = `sb-access-token=; ${attrs}`;

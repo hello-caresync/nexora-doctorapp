@@ -3,9 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
+  Activity,
   AlertTriangle,
   BedDouble,
   Building2,
+  CheckCircle2,
   ClipboardCheck,
   Copy,
   FlaskConical,
@@ -21,17 +23,18 @@ import {
   Plus,
   RefreshCw,
   Search,
+  ShieldCheck,
   Users,
   X,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { toast } from 'sonner';
-import { isHospitalSetupCompleted } from '@/lib/auth/admin-setup';
 import {
-  CURASYNC_ACTIVE_SESSION_KEY,
-  clearActiveSession,
-  parseActiveSession,
-} from '@/lib/auth/active-session';
+  isHospitalAppRole,
+  readHospitalAppSession,
+} from '@/lib/auth/ecosystem-sessions';
+import { isHospitalSetupCompleted } from '@/lib/auth/admin-setup';
+import { clearActiveSession } from '@/lib/auth/active-session';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -73,6 +76,7 @@ type QueueItem = {
   id: string;
   token: string;
   patient_name: string;
+  age: string;
   department: string;
   doctor_name: string;
   status: string;
@@ -151,6 +155,14 @@ type MessageRecord = {
   target: string;
   time: string;
 };
+
+const FALLBACK_OPD: QueueItem[] = [
+  { id: 'A-101', token: 'A-101', patient_name: 'Ramesh Gowda', age: '48', department: 'General Medicine', doctor_name: 'Dr. Suriraju V', status: 'In Consultation', notes: '', time: '10:15 AM' },
+  { id: 'A-102', token: 'A-102', patient_name: 'Meenakshi Sundaram', age: '34', department: 'Cardiology', doctor_name: 'Dr. Rajesh Sharma', status: 'Vitals Done', notes: '', time: '10:22 AM' },
+  { id: 'A-103', token: 'A-103', patient_name: 'Praveen Kumar', age: '29', department: 'Orthopedics', doctor_name: 'Dr. Ananya S', status: 'Waiting', notes: '', time: '10:30 AM' },
+  { id: 'A-104', token: 'A-104', patient_name: 'Sunita Devi', age: '52', department: 'Neurology', doctor_name: 'Dr. Suriraju V', status: 'Waiting', notes: '', time: '10:35 AM' },
+  { id: 'A-105', token: 'A-105', patient_name: 'Mohammad Farooq', age: '41', department: 'General Medicine', doctor_name: 'Dr. Suriraju V', status: 'Triaged', notes: '', time: '10:40 AM' },
+];
 
 const FALLBACK_BEDS: BedRecord[] = [
   { id: 'ICU-01', ward: 'Intensive Care Unit', bed: '01', status: 'Occupied', patient: 'Kiran Kumar', doc: 'Dr. Suriraju V' },
@@ -239,6 +251,7 @@ function mapQueue(row: Record<string, unknown>): QueueItem {
     id,
     token,
     patient_name: String(row.patient_name ?? row.name ?? '—'),
+    age: String(row.age ?? '—'),
     department: String(row.department ?? 'General Medicine'),
     doctor_name: String(row.doctor_name ?? row.assigned_doctor ?? 'Unassigned'),
     status: String(row.status ?? row.queue_status ?? 'Waiting'),
@@ -250,6 +263,7 @@ function mapQueue(row: Record<string, unknown>): QueueItem {
 export default function RegalHospitalApp() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<NavModule>('dashboard');
+  const [currentUserRole, setCurrentUserRole] = useState<string>('Staff');
   const [isLoading, setIsLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -266,7 +280,7 @@ export default function RegalHospitalApp() {
   });
 
   const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
-  const [opdQueue, setOpdQueue] = useState<QueueItem[]>([]);
+  const [opdQueue, setOpdQueue] = useState<QueueItem[]>(FALLBACK_OPD);
   const [patientRegistry, setPatientRegistry] = useState<PatientRecord[]>([]);
   const [bedCensus, setBedCensus] = useState<BedRecord[]>(FALLBACK_BEDS);
   const [pharmacyItems, setPharmacyItems] = useState<PharmacyRecord[]>([]);
@@ -343,7 +357,8 @@ export default function RegalHospitalApp() {
           const mapped = mapQueue(row);
           if (!queueMap.has(mapped.id)) queueMap.set(mapped.id, mapped);
         });
-      setOpdQueue(Array.from(queueMap.values()));
+      const liveQueue = Array.from(queueMap.values());
+      setOpdQueue(liveQueue.length > 0 ? liveQueue : FALLBACK_OPD);
 
       const patients = patientRows
         .filter((row) => matchesHospital(row, hospital.id, hospital.name))
@@ -480,52 +495,33 @@ export default function RegalHospitalApp() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const session =
-      parseActiveSession(localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY)) ||
-      parseActiveSession(localStorage.getItem('curasync_admin_session'));
+    const session = readHospitalAppSession();
+    const hospitalId = session?.hospital_id;
+    const staffType = session?.staff_type || 'Staff';
 
-    let hospitalId = session?.hospital_id;
-    let staffType = session?.staff_type;
-    let hospitalName = session?.hospital_name;
-    let adminName = session?.full_name;
-    let adminEmail = session?.email;
+    setCurrentUserRole(staffType);
 
-    if (!hospitalId) {
-      try {
-        const raw =
-          localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY) ||
-          localStorage.getItem('curasync_admin_session');
-        const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : null;
-        hospitalId = parsed?.hospital_id;
-        staffType = parsed?.staff_type;
-        hospitalName = parsed?.hospital_name || hospitalName;
-        adminName = parsed?.full_name || adminName;
-        adminEmail = parsed?.email || adminEmail;
-      } catch {
-        hospitalId = undefined;
-      }
-    }
-
-    if (!hospitalId || staffType !== 'Admin') {
-      router.replace('/admin/login');
+    if (!hospitalId || !isHospitalAppRole(staffType)) {
+      router.replace(staffType && staffType !== 'Admin' ? '/staff/login' : '/admin/login');
       return;
     }
 
     void (async () => {
-      const completed = await isHospitalSetupCompleted(hospitalId);
-      if (!completed) {
-        router.replace(`/dashboard/staff-credentials?hospitalId=${encodeURIComponent(hospitalId)}`);
-        return;
+      if (staffType === 'Admin') {
+        const completed = await isHospitalSetupCompleted(hospitalId);
+        if (!completed) {
+          router.replace(`/dashboard/staff-credentials?hospitalId=${encodeURIComponent(hospitalId)}`);
+          return;
+        }
       }
 
-      const nextInfo: HospitalInfo = {
+      setHospitalInfo({
         id: hospitalId,
         nodeCode: nodeCodeFor(hospitalId),
-        name: hospitalName || 'Regal Hospital',
-        adminName: adminName || 'Hospital Administrator',
-        adminEmail: adminEmail || '',
-      };
-      setHospitalInfo(nextInfo);
+        name: session.hospital_name || 'Regal Hospital',
+        adminName: session.full_name || 'Hospital User',
+        adminEmail: session.email || '',
+      });
       setIsVerifying(false);
     })();
   }, [router]);
@@ -630,18 +626,19 @@ export default function RegalHospitalApp() {
   };
 
   const handleLogout = () => {
+    const role = currentUserRole;
     clearActiveSession();
-    router.push('/admin/login');
+    router.push(role === 'Admin' ? '/admin/login' : '/staff/login');
   };
 
   const sidebar = (
     <>
-      <div className="p-5">
-        <div className="text-[11px] font-extrabold uppercase tracking-widest text-[#2dd4bf] mb-1 font-mono">
+      <div className="p-5 overflow-y-auto">
+        <div className="text-[11px] font-extrabold uppercase tracking-widest text-[#2dd4bf] font-mono">
           HOSPITAL APP
         </div>
-        <h1 className="text-lg font-black text-white tracking-tight leading-none">{hospitalInfo.name}</h1>
-        <div className="text-[11px] font-mono text-cyan-300/80 font-bold mt-1">{hospitalInfo.nodeCode}</div>
+        <h1 className="text-lg font-black text-white tracking-tight leading-tight mt-0.5">{hospitalInfo.name}</h1>
+        <div className="text-[11px] font-mono text-cyan-300/80 font-bold mt-0.5">{hospitalInfo.nodeCode}</div>
 
         <nav className="mt-6 space-y-1">
           {navLinks.map((item) => {
@@ -652,7 +649,7 @@ export default function RegalHospitalApp() {
                 key={item.id}
                 type="button"
                 onClick={() => openModule(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 cursor-pointer ${
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                   isActive
                     ? 'bg-[#18537a] text-white shadow-md font-bold'
                     : 'text-slate-300 hover:text-white hover:bg-[#0e3b5b]/60'
@@ -681,47 +678,19 @@ export default function RegalHospitalApp() {
         </nav>
       </div>
 
-      <div className="p-4 border-t border-[#124263] bg-[#07253a]/70 space-y-3">
-        <div className="text-[10px] font-mono uppercase font-bold text-cyan-400/90 tracking-wider">
-          Connected Workspaces
+      <div className="p-4 border-t border-[#124263] bg-[#07253a] flex items-center justify-between">
+        <div className="truncate pr-2">
+          <div className="text-xs font-bold text-white truncate">{hospitalInfo.adminName}</div>
+          <div className="text-[10px] text-cyan-300/70 truncate">{hospitalInfo.adminEmail}</div>
         </div>
-        <div className="grid grid-cols-3 gap-1.5 text-center">
-          <button
-            type="button"
-            onClick={() => window.open('/doctor/login', '_blank')}
-            className="p-2 rounded-lg bg-[#0e3b5b] hover:bg-[#144970] text-[10px] font-bold text-cyan-200 transition"
-          >
-            Doctor
-          </button>
-          <button
-            type="button"
-            onClick={() => window.open('/patient/login', '_blank')}
-            className="p-2 rounded-lg bg-[#0e3b5b] hover:bg-[#144970] text-[10px] font-bold text-emerald-200 transition"
-          >
-            Patient
-          </button>
-          <button
-            type="button"
-            onClick={() => window.open('/vendor/login', '_blank')}
-            className="p-2 rounded-lg bg-[#0e3b5b] hover:bg-[#144970] text-[10px] font-bold text-purple-200 transition"
-          >
-            Vendor
-          </button>
-        </div>
-        <div className="flex items-center justify-between pt-1">
-          <div className="min-w-0">
-            <div className="text-[11px] font-bold text-white truncate">{hospitalInfo.adminName}</div>
-            <div className="text-[10px] text-slate-400 truncate">{hospitalInfo.adminEmail}</div>
-          </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-[#0e3b5b]"
-            title="Sign out"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-[#0e3b5b] transition cursor-pointer"
+          title="Log Out"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
       </div>
     </>
   );
@@ -802,26 +771,191 @@ export default function RegalHospitalApp() {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6">
           {activeTab === 'dashboard' && (
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div>
                 <h3 className="text-lg font-black text-slate-900">Facility Operations Snapshot</h3>
                 <p className="text-xs text-slate-500">Live census across OPD, IPD, pharmacy, billing, and vendor supply.</p>
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                {[
-                  { label: 'Live OPD Queue', value: String(opdQueue.length), hint: `${waitingCount} waiting`, onClick: () => openModule('smartq') },
-                  { label: 'Provisioned Staff', value: String(staffMembers.length), hint: `${staffMembers.filter((s) => s.staff_type === 'Doctor').length} doctors`, onClick: () => openModule('staff') },
-                  { label: 'Bed Occupancy', value: `${occupancyRate}%`, hint: `${occupiedBeds}/${bedCensus.length} occupied`, onClick: () => openModule('ipd') },
-                  { label: 'Collections (₹)', value: inr(collectedTotal), hint: `${inr(unpaidTotal)} outstanding`, onClick: () => openModule('billing') },
-                ].map((card) => (
-                  <button key={card.label} type="button" onClick={card.onClick} className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
-                    <div className="text-xs font-bold text-slate-400 uppercase">{card.label}</div>
-                    <div className="text-3xl font-black text-[#0c314b] mt-1">{card.value}</div>
-                    <div className="text-[11px] text-cyan-700 font-bold mt-1">{card.hint}</div>
-                  </button>
-                ))}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                <button type="button" onClick={() => openModule('smartq')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">LIVE OPD QUEUE</div>
+                  <div className="text-3xl font-black text-slate-900 mt-2">{opdQueue.length}</div>
+                  <div className="text-xs font-medium text-cyan-700 mt-1">{waitingCount} waiting in triage</div>
+                </button>
+                <button type="button" onClick={() => openModule('staff')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">PROVISIONED STAFF</div>
+                  <div className="text-3xl font-black text-slate-900 mt-2">{staffMembers.length}</div>
+                  <div className="text-xs font-medium text-cyan-700 mt-1">{staffMembers.filter((s) => s.staff_type === 'Doctor').length} doctors verified</div>
+                </button>
+                <button type="button" onClick={() => openModule('ipd')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">BED OCCUPANCY</div>
+                  <div className="text-3xl font-black text-slate-900 mt-2">{occupancyRate}%</div>
+                  <div className="text-xs font-medium text-cyan-700 mt-1">{occupiedBeds}/{bedCensus.length} occupied</div>
+                </button>
+                <button type="button" onClick={() => openModule('billing')} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">COLLECTIONS (₹)</div>
+                  <div className="text-3xl font-black text-slate-900 mt-2">{inr(collectedTotal)}</div>
+                  <div className="text-xs font-medium text-emerald-600 mt-1">{inr(unpaidTotal)} outstanding today</div>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                <div className="lg:col-span-7 space-y-6">
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Activity className="w-4 h-4 text-cyan-700" />
+                        <h4 className="text-sm font-black text-slate-900">Live Outpatient Queue (SmartQ)</h4>
+                      </div>
+                      <button type="button" onClick={() => openModule('smartq')} className="text-[11px] font-mono font-bold text-cyan-700 bg-cyan-50 px-2 py-0.5 rounded-full border border-cyan-200">
+                        Realtime Feed
+                      </button>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400">
+                            <th className="py-2.5 px-3">Token</th>
+                            <th className="py-2.5 px-3">Patient</th>
+                            <th className="py-2.5 px-3">Department</th>
+                            <th className="py-2.5 px-3">Doctor</th>
+                            <th className="py-2.5 px-3">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {opdQueue.slice(0, 8).map((item) => (
+                            <tr key={item.id} className="hover:bg-slate-50 transition">
+                              <td className="py-3 px-3 font-mono font-black text-cyan-800">{item.token}</td>
+                              <td className="py-3 px-3">
+                                <div className="font-bold text-slate-900">{item.patient_name}</div>
+                                <div className="text-[10px] text-slate-400">Age: {item.age} &bull; {item.time}</div>
+                              </td>
+                              <td className="py-3 px-3 text-slate-600">{item.department}</td>
+                              <td className="py-3 px-3 text-slate-700 font-medium">{item.doctor_name}</td>
+                              <td className="py-3 px-3">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    /consult/i.test(item.status)
+                                      ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                      : /vital/i.test(item.status)
+                                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  }`}
+                                >
+                                  {item.status}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BedDouble className="w-4 h-4 text-cyan-700" />
+                        <h4 className="text-sm font-black text-slate-900">Inpatient Ward &amp; Bed Census</h4>
+                      </div>
+                      <button type="button" onClick={() => openModule('ipd')} className="text-[11px] font-mono text-slate-400">
+                        ICU &amp; General Units
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {bedCensus.map((bed) => (
+                        <div key={bed.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60 flex items-center justify-between">
+                          <div>
+                            <div className="text-xs font-bold text-slate-900">{bed.ward} &bull; Bed {bed.bed}</div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              {bed.status === 'Occupied' ? `Patient: ${bed.patient}` : 'Ready for admission'}
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            bed.status === 'Occupied'
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          }`}>
+                            {bed.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="lg:col-span-5 space-y-6">
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-rose-600" />
+                        <h4 className="text-sm font-black text-slate-900">Emergency &amp; Triage Alerts</h4>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        emergencyActive > 0
+                          ? 'text-rose-700 bg-rose-50 border-rose-200'
+                          : 'text-emerald-600 bg-emerald-50 border-emerald-200'
+                      }`}>
+                        {emergencyActive > 0 ? `${emergencyActive} Active` : 'Normal Flow'}
+                      </span>
+                    </div>
+                    <div className="p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-1">
+                      <div className="font-bold flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Duty Medical Officer Assigned</span>
+                      </div>
+                      <p className="text-[11px] text-blue-700">
+                        Emergency Bay 1 and Trauma response are staffed. Real-time patient triage synchronized with Doctor Portal.
+                      </p>
+                    </div>
+                    {emergencyDesk.slice(0, 3).map((alert) => (
+                      <div key={alert.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/60">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-900">{alert.patient_name}</span>
+                          <span className="text-[10px] font-bold text-rose-700">{alert.priority}</span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 mt-1">{alert.complaint}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <PackageCheck className="w-4 h-4 text-cyan-700" />
+                        <h4 className="text-sm font-black text-slate-900">Vendor Supply Dispatches</h4>
+                      </div>
+                      <button type="button" onClick={() => openModule('supply')} className="text-[11px] font-bold text-cyan-700">
+                        {supplyOrders.length} In-Transit
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      {supplyOrders.slice(0, 4).map((order) => (
+                        <div key={order.id} className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-bold text-xs text-cyan-800">{order.id}</span>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-100 text-cyan-800">
+                              {order.status}
+                            </span>
+                          </div>
+                          <div className="text-xs font-bold text-slate-900">{order.item}</div>
+                          <div className="flex items-center justify-between text-[11px] text-slate-400">
+                            <span>{order.vendor}</span>
+                            <span className="font-bold text-slate-700">{order.amount}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {pharmacyItems.length > 0 && (
+                      <div className="pt-2 border-t border-slate-100 text-[11px] text-slate-500">
+                        Pharmacy health: {pharmacyItems.filter((item) => item.status === 'Low Stock').length} low-stock SKUs of {pharmacyItems.length} tracked.
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -1146,72 +1280,100 @@ export default function RegalHospitalApp() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-black text-slate-900">Hospital Staff Directory &amp; Keyring</h3>
-                  <p className="text-xs text-slate-500">Live credentials from Staff Vault, scoped to {hospitalInfo.id}.</p>
+                  <h3 className="text-lg font-black text-slate-900">Hospital Staff Directory</h3>
+                  <p className="text-xs text-slate-500">
+                    Facility personnel, active rosters, and access clearances.
+                  </p>
                 </div>
-                <div className="relative w-full sm:w-72">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="Search doctor, staff or department..."
-                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-cyan-600"
-                  />
+                <button
+                  type="button"
+                  onClick={() => router.push('/dashboard/staff-credentials')}
+                  className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Add Staff Credential</span>
+                </button>
+              </div>
+
+              {currentUserRole !== 'Admin' ? (
+                <div className="p-10 bg-white rounded-2xl border border-slate-200 text-center space-y-3 shadow-xs">
+                  <div className="p-3 bg-cyan-50 text-cyan-700 rounded-full w-fit mx-auto border border-cyan-200">
+                    <ShieldCheck className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-900">Credential Keyring Restricted</h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    You are currently logged in with <span className="font-semibold text-slate-700">{currentUserRole}</span> clearance.
+                    You may provision new staff accounts, but existing security passcodes and master identifiers are restricted to Hospital Administrators.
+                  </p>
                 </div>
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                    <tr>
-                      <th className="py-3 px-4">Staff ID &amp; Name</th>
-                      <th className="py-3 px-4">Designation &amp; Dept</th>
-                      <th className="py-3 px-4">Login Email</th>
-                      <th className="py-3 px-4">Passcode Key</th>
-                      <th className="py-3 px-4">Target Workspace</th>
-                      <th className="py-3 px-4 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredStaff.map((member) => (
-                      <tr key={member.id} className="hover:bg-cyan-50/40 transition">
-                        <td className="py-3.5 px-4 font-medium">
-                          <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 mr-2">
-                            {member.id}
-                          </span>
-                          <span className="font-bold text-slate-900">{member.full_name}</span>
-                        </td>
-                        <td className="py-3.5 px-4">
-                          <span className="font-semibold text-slate-700">{member.staff_type}</span>
-                          <span className="text-slate-400 block text-[11px]">{member.department}</span>
-                        </td>
-                        <td className="py-3.5 px-4 font-mono text-slate-600">{member.email}</td>
-                        <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">
-                          <button
-                            type="button"
-                            className="inline-flex items-center gap-1"
-                            onClick={() => {
-                              if (member.temporary_passcode) {
-                                void navigator.clipboard.writeText(member.temporary_passcode);
-                                toast.success('Passcode copied');
-                              }
-                            }}
-                          >
-                            {member.temporary_passcode || '—'}
-                            <Copy className="w-3 h-3 text-slate-400" />
-                          </button>
-                        </td>
-                        <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500">{member.portal_access}</td>
-                        <td className="py-3.5 px-4 text-right">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            {member.status || 'Active'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              ) : (
+                <>
+                  <div className="relative w-full sm:w-72 ml-auto">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(event) => setSearchQuery(event.target.value)}
+                      placeholder="Search doctor, staff or department..."
+                      className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-cyan-600"
+                    />
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                          <tr>
+                            <th className="py-3 px-4">Staff Member &amp; ID</th>
+                            <th className="py-3 px-4">Department &amp; Role</th>
+                            <th className="py-3 px-4">Login Email</th>
+                            <th className="py-3 px-4">Passcode Key</th>
+                            <th className="py-3 px-4">Workspace Target</th>
+                            <th className="py-3 px-4 text-right">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredStaff.map((member) => (
+                            <tr key={member.id} className="hover:bg-cyan-50/40 transition">
+                              <td className="py-3.5 px-4">
+                                <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 mr-2">
+                                  {member.id}
+                                </span>
+                                <span className="font-bold text-slate-900">{member.full_name}</span>
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-600">
+                                <span className="font-semibold text-slate-800">{member.staff_type}</span>
+                                <span className="text-slate-400 block text-[11px]">{member.department}</span>
+                              </td>
+                              <td className="py-3.5 px-4 font-mono text-slate-600">{member.email}</td>
+                              <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1"
+                                  onClick={() => {
+                                    if (member.temporary_passcode) {
+                                      void navigator.clipboard.writeText(member.temporary_passcode);
+                                      toast.success('Passcode copied');
+                                    }
+                                  }}
+                                >
+                                  {member.temporary_passcode || '—'}
+                                  <Copy className="w-3 h-3 text-slate-400" />
+                                </button>
+                              </td>
+                              <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500">{member.portal_access}</td>
+                              <td className="py-3.5 px-4 text-right">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                  {member.status || 'Active'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

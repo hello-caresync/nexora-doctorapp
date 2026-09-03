@@ -46,9 +46,6 @@ type ProvisionRole = 'Doctor' | 'Nurse' | 'Receptionist' | 'Pharmacist';
 
 function resolvePortalRoute(role: ProvisionRole): string {
   if (role === 'Doctor') return '/doctor/workspace';
-  if (role === 'Receptionist') return '/staff/reception';
-  if (role === 'Pharmacist') return '/staff/pharmacy';
-  if (role === 'Nurse') return '/staff/nursing';
   return '/dashboard';
 }
 
@@ -108,24 +105,32 @@ function StaffCredentialsContent() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const stored = localStorage.getItem('curasync_active_session');
+    const stored =
+      localStorage.getItem('curasync_active_session') ||
+      localStorage.getItem('curasync_admin_session') ||
+      localStorage.getItem('curasync_staff_session');
     if (!stored) {
-      router.replace('/admin/login');
+      router.replace('/staff/login');
       return;
     }
 
     try {
       const session = JSON.parse(stored) as {
         hospital_id?: string;
+        hospitalId?: string;
         hospital_name?: string;
+        hospitalName?: string;
         full_name?: string;
+        staff_type?: string;
+        role?: string;
       };
-      if (session?.hospital_id) {
+      const hospitalId = hospitalIdParam || session.hospital_id || session.hospitalId;
+      if (hospitalId) {
         setCurrentHospital({
-          id: hospitalIdParam || session.hospital_id,
-          name: session.hospital_name || 'Hospital Node',
+          id: hospitalId,
+          name: session.hospital_name || session.hospitalName || 'Hospital Node',
         });
-        setAdminName(session.full_name || 'Hospital Admin');
+        setAdminName(session.full_name || 'Hospital User');
       }
     } catch {
       router.replace('/admin/login');

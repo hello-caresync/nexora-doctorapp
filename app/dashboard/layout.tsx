@@ -5,7 +5,7 @@ import { EcosystemRouteGuard } from '@/components/auth/EcosystemRouteGuard';
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
-    <EcosystemRouteGuard role="admin" loginPath="/admin/login">
+    <EcosystemRouteGuard role="hospital" loginPath="/admin/login">
       {children}
     </EcosystemRouteGuard>
   );

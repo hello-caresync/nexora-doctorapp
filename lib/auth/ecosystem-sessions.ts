@@ -48,15 +48,59 @@ function mirrorSessionCookie(name: string, payload: string): void {
 
 export function persistStaffPortalSession(session: StaffPortalSession): void {
   if (typeof window === 'undefined') return;
-  const payload = JSON.stringify(session);
+
+  const hospitalSession = {
+    ...session,
+    role: session.staff_type,
+    hospitalId: session.hospital_id,
+    hospitalName: session.hospital_name,
+    portal_access: session.portal_access || '/dashboard',
+  };
+  const payload = JSON.stringify(hospitalSession);
+
   localStorage.setItem(SESSION_KEYS.staff, payload);
+  localStorage.setItem('curasync_admin_session', payload);
+  localStorage.setItem(SESSION_KEYS.admin, payload);
   setNexoraRoleCookie('staff');
-  mirrorSessionCookie(SESSION_KEYS.staff, payload);
+  document.cookie = `${SESSION_KEYS.staff}=${encodeURIComponent(session.hospital_id)}; ${COOKIE_ATTRS}`;
 }
 
 export function getStaffPortalSession(): StaffPortalSession | null {
   if (typeof window === 'undefined') return null;
   return parseJsonSession<StaffPortalSession>(localStorage.getItem(SESSION_KEYS.staff));
+}
+
+const HOSPITAL_APP_ROLES = ['Admin', 'Nurse', 'Receptionist', 'Pharmacist'] as const;
+
+export function isHospitalAppRole(role?: string | null): boolean {
+  return Boolean(role && (HOSPITAL_APP_ROLES as readonly string[]).includes(role));
+}
+
+export function readHospitalAppSession(): StaffPortalSession | null {
+  if (typeof window === 'undefined') return null;
+
+  const keys = [SESSION_KEYS.admin, 'curasync_admin_session', SESSION_KEYS.staff];
+  for (const key of keys) {
+    const parsed = parseJsonSession<
+      StaffPortalSession & { role?: string; hospitalId?: string; hospitalName?: string }
+    >(localStorage.getItem(key));
+    const hospitalId = parsed?.hospital_id || parsed?.hospitalId;
+    if (!parsed || !hospitalId) continue;
+
+    const staffType = parsed.staff_type || parsed.role || 'Staff';
+    return {
+      id: parsed.id || '',
+      hospital_id: hospitalId,
+      hospital_name: parsed.hospital_name || parsed.hospitalName || 'Hospital Node',
+      full_name: parsed.full_name || 'Hospital User',
+      staff_type: staffType,
+      department: parsed.department || '',
+      email: parsed.email || '',
+      portal_access: parsed.portal_access || '/dashboard',
+    };
+  }
+
+  return null;
 }
 
 export function persistVendorSession(session: VendorSession): void {
@@ -74,9 +118,7 @@ export function getVendorSession(): VendorSession | null {
 
 export function resolveStaffDepartmentRoute(staffType: string): string {
   const role = staffType.trim();
-  if (role === 'Nurse') return '/staff/nursing';
-  if (role === 'Pharmacist') return '/staff/pharmacy';
-  if (role === 'Receptionist') return '/staff/reception';
   if (role === 'Admin') return '/admin/login';
+  if (['Nurse', 'Pharmacist', 'Receptionist'].includes(role)) return '/dashboard';
   return '/staff/login';
 }

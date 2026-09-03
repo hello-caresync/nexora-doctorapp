@@ -17,11 +17,11 @@ import {
   Users2,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
+import { toast } from 'sonner';
 import { recordRealStaffLogin, type AuthenticatedUserPayload } from '@/lib/recordStaffLogin';
 import {
   getStaffPortalSession,
   persistStaffPortalSession,
-  resolveStaffDepartmentRoute,
   type StaffPortalSession,
 } from '@/lib/auth/ecosystem-sessions';
 import {
@@ -67,7 +67,7 @@ function HospitalStaffLoginForm() {
         !redirectUrl.startsWith('/staff/login')
           ? redirectUrl
           : null;
-      router.replace(safeRedirect || resolveStaffDepartmentRoute(activeSession.staff_type));
+      router.replace(safeRedirect || '/dashboard');
       return;
     }
 
@@ -131,7 +131,7 @@ function HospitalStaffLoginForm() {
         return;
       }
 
-      const portalAccess = resolveStaffDepartmentRoute(user.staff_type);
+      const portalAccess = '/dashboard';
 
       void recordRealStaffLogin({
         id: user.id,
@@ -159,7 +159,8 @@ function HospitalStaffLoginForm() {
 
       persistStaffPortalSession(session);
 
-      router.push(redirectUrl || portalAccess);
+      toast.success(`Authenticated as ${user.full_name} (${user.staff_type})`);
+      router.push(redirectUrl && redirectUrl.startsWith('/dashboard') ? redirectUrl : '/dashboard');
     } catch (err: unknown) {
       setErrorMessage(
         err instanceof Error ? err.message : 'Authentication failed. Please verify your credentials.',
@@ -212,9 +213,9 @@ function HospitalStaffLoginForm() {
               <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
                 <Users2 className="h-5 w-5 shrink-0 text-cyan-400" />
                 <div className="text-xs">
-                  <div className="font-bold text-white">Direct Workspace Routing</div>
+                  <div className="font-bold text-white">Hospital App Routing</div>
                   <div className="text-[11px] text-slate-400">
-                    Routes to your assigned department portal — not admin setup
+                    Nurses, reception, and pharmacy enter the shared Hospital App dashboard
                   </div>
                 </div>
               </div>

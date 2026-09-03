@@ -10,12 +10,14 @@ import {
 import {
   getStaffPortalSession,
   getVendorSession,
+  isHospitalAppRole,
   parseJsonSession,
+  readHospitalAppSession,
   SESSION_KEYS,
 } from '@/lib/auth/ecosystem-sessions';
 import { parseSuperAdminSession, SUPER_ADMIN_SESSION_KEY } from '@/lib/auth/super-admin-session';
 
-type GuardRole = 'admin' | 'staff' | 'vendor' | 'patient' | 'superadmin' | 'doctor';
+type GuardRole = 'admin' | 'staff' | 'vendor' | 'patient' | 'superadmin' | 'doctor' | 'hospital';
 
 type RouteGuardProps = {
   role: GuardRole;
@@ -61,6 +63,9 @@ export function EcosystemRouteGuard({ role, children, loginPath }: RouteGuardPro
           parseActiveSession(localStorage.getItem('curasync_admin_session'))?.staff_type === 'Admin';
         break;
       }
+      case 'hospital':
+        ok = isHospitalAppRole(readHospitalAppSession()?.staff_type);
+        break;
       case 'staff':
         ok = Boolean(getStaffPortalSession());
         break;
@@ -80,7 +85,12 @@ export function EcosystemRouteGuard({ role, children, loginPath }: RouteGuardPro
 
     if (!ok) {
       const next = pathname ? `?redirect=${encodeURIComponent(pathname)}` : '';
-      router.replace(`${loginPath}${next}`);
+      const hospitalSession = readHospitalAppSession();
+      const fallbackLogin =
+        role === 'hospital' && hospitalSession?.staff_type && hospitalSession.staff_type !== 'Admin'
+          ? '/staff/login'
+          : loginPath;
+      router.replace(`${fallbackLogin}${next}`);
       return;
     }
 
