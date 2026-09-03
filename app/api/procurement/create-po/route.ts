@@ -1,3 +1,5 @@
+export const runtime = 'edge';
+
 import { NextResponse } from 'next/server';
 
 import { createPurchaseOrder, scanLowStockAndCreatePo, verifyGoodsReceipt } from '@/lib/hospital/operations/procurement';
