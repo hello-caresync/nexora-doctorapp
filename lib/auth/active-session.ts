@@ -1,4 +1,4 @@
-import { setNexoraRoleCookie } from './role-cookies';
+import { clearNexoraRoleCookie, setNexoraRoleCookie } from './role-cookies';
 
 export const CURASYNC_ACTIVE_SESSION_KEY = 'curasync_active_session';
 export const ADMIN_PROVISIONING_PATH = '/dashboard/staff-credentials';
@@ -77,7 +77,12 @@ export function clearActiveSession(): void {
   if (typeof window === 'undefined') return;
 
   localStorage.removeItem(CURASYNC_ACTIVE_SESSION_KEY);
+  localStorage.removeItem('curasync_admin_session');
+  clearNexoraRoleCookie();
+
   const attrs = 'path=/; max-age=0; SameSite=Lax';
+  document.cookie = `curasync_admin_session=; ${attrs}`;
+  document.cookie = `curasync_active_session=; ${attrs}`;
   document.cookie = `curasync_session=; ${attrs}`;
   document.cookie = `auth-token=; ${attrs}`;
   document.cookie = `sb-access-token=; ${attrs}`;
