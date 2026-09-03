@@ -3,22 +3,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
-  Activity,
+  AlertTriangle,
   BedDouble,
   Building2,
-  Clock,
-  ExternalLink,
+  ClipboardCheck,
+  Copy,
+  FlaskConical,
+  HeartHandshake,
+  IndianRupee,
+  LayoutGrid,
+  ListOrdered,
   Loader2,
   LogOut,
   Menu,
-  Phone,
-  Pill,
+  MessageSquareQuote,
+  PackageCheck,
   Plus,
   RefreshCw,
   Search,
-  ShieldCheck,
-  Stethoscope,
-  Truck,
   Users,
   X,
 } from 'lucide-react';
@@ -35,12 +37,23 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-type OpsTab = 'opd' | 'doctors' | 'beds' | 'pharmacy' | 'vendors';
+type NavModule =
+  | 'dashboard'
+  | 'smartq'
+  | 'patients'
+  | 'ipd'
+  | 'pharmacy'
+  | 'labs'
+  | 'emergency'
+  | 'billing'
+  | 'supply'
+  | 'staff'
+  | 'messages';
 
 type HospitalInfo = {
   id: string;
+  nodeCode: string;
   name: string;
-  city: string;
   adminName: string;
   adminEmail: string;
 };
@@ -51,240 +64,418 @@ type StaffMember = {
   staff_type: string;
   department: string;
   email: string;
+  temporary_passcode?: string;
+  portal_access?: string;
   status?: string;
 };
 
-type TriageItem = {
+type QueueItem = {
   id: string;
   token: string;
   patient_name: string;
   department: string;
-  assigned_doctor: string;
+  doctor_name: string;
   status: string;
+  notes: string;
   time: string;
+};
+
+type PatientRecord = {
+  id: string;
+  name: string;
+  uhid: string;
+  phone: string;
+  department: string;
+  status: string;
 };
 
 type BedRecord = {
   id: string;
   ward: string;
-  bed_number: string;
+  bed: string;
   status: string;
-  patient_name: string;
-  doctor: string;
+  patient: string;
+  doc: string;
 };
 
-type PharmacyItem = {
+type PharmacyRecord = {
   id: string;
   name: string;
   category: string;
   stock: number;
-  unit: string;
   status: string;
 };
 
-type VendorRecord = {
+type LabRecord = {
   id: string;
-  name: string;
-  category: string;
-  contact: string;
+  patient_name: string;
+  test: string;
+  doctor_name: string;
   status: string;
-  orders: number;
+  time: string;
+};
+
+type EmergencyRecord = {
+  id: string;
+  patient_name: string;
+  complaint: string;
+  priority: string;
+  status: string;
+  time: string;
+};
+
+type BillRecord = {
+  id: string;
+  invoice: string;
+  patient_name: string;
+  consultation: number;
+  pharmacy: number;
+  total: number;
+  status: string;
+};
+
+type SupplyOrder = {
+  id: string;
+  vendor: string;
+  item: string;
+  amount: string;
+  status: string;
+  time: string;
+};
+
+type MessageRecord = {
+  id: string;
+  title: string;
+  body: string;
+  from: string;
+  target: string;
+  time: string;
 };
 
 const FALLBACK_BEDS: BedRecord[] = [
-  { id: 'BED-101', ward: 'ICU', bed_number: '01', status: 'Occupied', patient_name: 'Rahul K', doctor: 'Dr. Suriraju V' },
-  { id: 'BED-102', ward: 'ICU', bed_number: '02', status: 'Available', patient_name: '-', doctor: '-' },
-  { id: 'BED-201', ward: 'General Ward A', bed_number: '01', status: 'Occupied', patient_name: 'Priya Sharma', doctor: 'Dr. Ananya R' },
-  { id: 'BED-202', ward: 'General Ward A', bed_number: '02', status: 'Available', patient_name: '-', doctor: '-' },
-  { id: 'BED-203', ward: 'General Ward A', bed_number: '03', status: 'Available', patient_name: '-', doctor: '-' },
-  { id: 'BED-301', ward: 'Post-Op Recovery', bed_number: '01', status: 'Cleaning', patient_name: '-', doctor: '-' },
+  { id: 'ICU-01', ward: 'Intensive Care Unit', bed: '01', status: 'Occupied', patient: 'Kiran Kumar', doc: 'Dr. Suriraju V' },
+  { id: 'ICU-02', ward: 'Intensive Care Unit', bed: '02', status: 'Available', patient: '-', doc: '-' },
+  { id: 'GEN-01', ward: 'General Medical Ward', bed: '01', status: 'Occupied', patient: 'Meera Rao', doc: 'Dr. Ananya S' },
+  { id: 'GEN-02', ward: 'General Medical Ward', bed: '02', status: 'Occupied', patient: 'Vijay Patil', doc: 'Dr. Suriraju V' },
+  { id: 'GEN-03', ward: 'General Medical Ward', bed: '03', status: 'Available', patient: '-', doc: '-' },
 ];
 
-const FALLBACK_PHARMACY: PharmacyItem[] = [
-  { id: 'MED-01', name: 'Paracetamol 650mg', category: 'Antipyretic', stock: 450, unit: 'Tablets', status: 'In Stock' },
-  { id: 'MED-02', name: 'Amoxicillin 500mg', category: 'Antibiotic', stock: 120, unit: 'Capsules', status: 'In Stock' },
-  { id: 'MED-03', name: 'Pantoprazole 40mg', category: 'Antacid', stock: 35, unit: 'Tablets', status: 'Low Stock' },
-  { id: 'MED-04', name: 'Normal Saline 500ml', category: 'IV Fluid', stock: 85, unit: 'Bottles', status: 'In Stock' },
+const FALLBACK_SUPPLY: SupplyOrder[] = [
+  { id: 'ORD-8821', vendor: 'MedLife Pharma', item: 'Surgical Gloves & Syringes', amount: '₹42,500', status: 'Dispatched', time: '10 mins ago' },
+  { id: 'ORD-8822', vendor: 'Apex Biomedical', item: 'Pulse Oximeter Probes (x20)', amount: '₹18,200', status: 'In Transit', time: '1 hr ago' },
+  { id: 'ORD-8823', vendor: 'Reliance Labs', item: 'Biochemical Reagent Kits', amount: '₹76,000', status: 'Delivered', time: 'Today, 9:30 AM' },
 ];
 
-const FALLBACK_VENDORS: VendorRecord[] = [
-  { id: 'VEND-01', name: 'MedLife Pharmaceuticals', category: 'Pharma Medicines', contact: '+91 98451 22334', status: 'Active Supplier', orders: 18 },
-  { id: 'VEND-02', name: 'Apex Biomedical Surgicals', category: 'Surgical Equipment', contact: '+91 98452 33445', status: 'Active Supplier', orders: 6 },
-  { id: 'VEND-03', name: 'Reliance Diagnostics', category: 'Lab & Pathology', contact: '+91 98453 44556', status: 'Verified', orders: 12 },
+const REALTIME_TABLES = [
+  'hospital_staff_credentials',
+  'appointments',
+  'patient_appointments',
+  'opd_queue',
+  'opd_queues',
+  'patients',
+  'hospital_beds',
+  'inventory_items',
+  'prescriptions',
+  'clinical_notes',
+  'emergency_triages',
+  'bills',
+  'billing_invoices',
+  'purchase_orders',
+  'hospital_procurement_orders',
+  'vendor_orders',
+  'system_notifications',
+  'channel_messages',
 ];
 
-const DEPARTMENTS = [
-  'All',
-  'General Medicine',
-  'Hospital Administration',
-  'Pharmacy',
-  'Reception',
-  'Nursing',
-  'Pediatrics',
-  'Neurology',
-  'Cardiology',
-  'Orthopedics',
-  'ENT',
-];
-
-function belongsToHospital(row: Record<string, unknown>, hospitalId: string, hospitalName: string): boolean {
-  const rowHospitalId = String(row.hospital_id ?? '').trim();
-  if (rowHospitalId && rowHospitalId === hospitalId) return true;
-  const rowHospitalName = String(row.hospital_name ?? '').trim().toLowerCase();
-  const targetName = hospitalName.trim().toLowerCase();
-  if (rowHospitalName && targetName && rowHospitalName.includes(targetName)) return true;
-  return !rowHospitalId && !rowHospitalName;
+function inr(amount: number): string {
+  return new Intl.NumberFormat('en-IN', {
+    style: 'currency',
+    currency: 'INR',
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(amount) ? amount : 0);
 }
 
-function mapAppointmentToTriage(row: Record<string, unknown>): TriageItem | null {
-  const id = String(row.id ?? row.appointment_id ?? '');
-  if (!id) return null;
+function relativeTime(value?: string): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const diff = Date.now() - date.getTime();
+  const mins = Math.max(0, Math.floor(diff / 60000));
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins} mins ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return date.toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' });
+}
 
-  const rawStatus = String(row.status ?? row.queue_status ?? 'Waiting in Triage');
-  if (/completed|done|cancelled/i.test(rawStatus)) return null;
+function nodeCodeFor(hospitalId: string): string {
+  if (!hospitalId || hospitalId === 'HOSP-01') return 'RH-BLR-01';
+  return hospitalId.replace('HOSP-', 'RH-');
+}
 
-  const tokenRaw = row.token ?? row.token_number ?? row.token_label ?? row.queue_number ?? '';
-  const createdAt = String(row.created_at ?? row.appointment_time ?? '');
+function matchesHospital(row: Record<string, unknown>, hospitalId: string, hospitalName: string): boolean {
+  const rowId = String(row.hospital_id ?? '').trim();
+  if (rowId && rowId === hospitalId) return true;
+  const rowName = String(row.hospital_name ?? '').trim().toLowerCase();
+  if (rowName && hospitalName && rowName.includes(hospitalName.toLowerCase())) return true;
+  const code = String(row.facility_code ?? row.hospital_code ?? '').trim();
+  if (code && (code === 'RH-BLR-01' || code === hospitalId) && (hospitalId === 'HOSP-01' || hospitalName.toLowerCase().includes('regal'))) {
+    return true;
+  }
+  return !rowId && !rowName && !code;
+}
 
+async function selectRows(table: string): Promise<Record<string, unknown>[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from(table).select('*').order('created_at', { ascending: false });
+  if (error || !data) return [];
+  return data as Record<string, unknown>[];
+}
+
+function mapQueue(row: Record<string, unknown>): QueueItem {
+  const id = String(row.id ?? row.appointment_id ?? crypto.randomUUID());
+  const token = String(row.token_number ?? row.token ?? row.queue_number ?? `OPD-${id.slice(0, 4).toUpperCase()}`);
   return {
     id,
-    token: tokenRaw ? String(tokenRaw) : `OPD-${id.slice(0, 4).toUpperCase()}`,
+    token,
     patient_name: String(row.patient_name ?? row.name ?? '—'),
     department: String(row.department ?? 'General Medicine'),
-    assigned_doctor: String(row.assigned_doctor ?? row.doctor_name ?? row.doctor ?? 'Unassigned'),
-    status: rawStatus || 'Waiting in Triage',
-    time: createdAt
-      ? new Date(createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : String(row.time ?? '—'),
+    doctor_name: String(row.doctor_name ?? row.assigned_doctor ?? 'Unassigned'),
+    status: String(row.status ?? row.queue_status ?? 'Waiting'),
+    notes: String(row.chief_complaint ?? row.clinical_advice ?? row.diagnosis ?? row.reason_for_visit ?? ''),
+    time: relativeTime(String(row.updated_at ?? row.created_at ?? row.slot_time ?? '')),
   };
 }
 
-function mapBed(row: Record<string, unknown>, index: number): BedRecord {
-  const statusRaw = String(row.status ?? 'Available');
-  const status = /occup/i.test(statusRaw)
-    ? 'Occupied'
-    : /clean/i.test(statusRaw)
-      ? 'Cleaning'
-      : /avail|free|vacant/i.test(statusRaw)
-        ? 'Available'
-        : statusRaw;
-  return {
-    id: String(row.id ?? `BED-${index + 1}`),
-    ward: String(row.ward ?? row.ward_name ?? row.ward_type ?? 'General Ward'),
-    bed_number: String(row.bed_number ?? row.number ?? String(index + 1).padStart(2, '0')),
-    status,
-    patient_name: String(row.patient_name ?? row.occupant ?? '-'),
-    doctor: String(row.doctor ?? row.attending_doctor ?? row.doctor_name ?? '-'),
-  };
-}
-
-function mapPharmacy(row: Record<string, unknown>, index: number): PharmacyItem {
-  const stock = Number(row.stock ?? row.quantity ?? row.on_hand ?? 0);
-  return {
-    id: String(row.id ?? row.sku ?? `MED-${String(index + 1).padStart(2, '0')}`),
-    name: String(row.name ?? row.medicine_name ?? row.item_name ?? 'Unnamed item'),
-    category: String(row.category ?? row.therapeutic_class ?? 'General'),
-    stock,
-    unit: String(row.unit ?? row.uom ?? 'Units'),
-    status: stock > 0 && stock < 50 ? 'Low Stock' : stock > 0 ? 'In Stock' : 'Out of Stock',
-  };
-}
-
-function mapVendor(row: Record<string, unknown>, index: number): VendorRecord {
-  return {
-    id: String(row.id ?? `VEND-${String(index + 1).padStart(2, '0')}`),
-    name: String(row.name ?? row.vendor_name ?? row.company_name ?? 'Vendor'),
-    category: String(row.category ?? 'General'),
-    contact: String(row.contact ?? row.phone ?? row.rep_email ?? row.email ?? '—'),
-    status: String(row.status ?? 'Active Supplier'),
-    orders: Number(row.orders ?? row.order_count ?? 0),
-  };
-}
-
-const navButtonClass = (active: boolean) =>
-  `w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer ${
-    active ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-  }`;
-
-export default function HospitalMasterDashboard() {
+export default function RegalHospitalApp() {
   const router = useRouter();
-
-  const [activeTab, setActiveTab] = useState<OpsTab>('opd');
-  const [activeDepartment, setActiveDepartment] = useState('All');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<NavModule>('dashboard');
   const [isLoading, setIsLoading] = useState(false);
-  const [isVerifyingGuard, setIsVerifyingGuard] = useState(true);
+  const [isVerifying, setIsVerifying] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [walkInName, setWalkInName] = useState('');
+  const [showTokenModal, setShowTokenModal] = useState(false);
 
   const [hospitalInfo, setHospitalInfo] = useState<HospitalInfo>({
     id: '',
-    name: '',
-    city: 'Bengaluru',
+    nodeCode: 'RH-BLR-01',
+    name: 'Regal Hospital',
     adminName: '',
     adminEmail: '',
   });
 
-  const [staffList, setStaffList] = useState<StaffMember[]>([]);
-  const [triageQueue, setTriageQueue] = useState<TriageItem[]>([]);
-  const [bedList, setBedList] = useState<BedRecord[]>(FALLBACK_BEDS);
-  const [pharmacyItems, setPharmacyItems] = useState<PharmacyItem[]>(FALLBACK_PHARMACY);
-  const [vendorList, setVendorList] = useState<VendorRecord[]>(FALLBACK_VENDORS);
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
+  const [opdQueue, setOpdQueue] = useState<QueueItem[]>([]);
+  const [patientRegistry, setPatientRegistry] = useState<PatientRecord[]>([]);
+  const [bedCensus, setBedCensus] = useState<BedRecord[]>(FALLBACK_BEDS);
+  const [pharmacyItems, setPharmacyItems] = useState<PharmacyRecord[]>([]);
+  const [labOrders, setLabOrders] = useState<LabRecord[]>([]);
+  const [emergencyDesk, setEmergencyDesk] = useState<EmergencyRecord[]>([]);
+  const [bills, setBills] = useState<BillRecord[]>([]);
+  const [supplyOrders, setSupplyOrders] = useState<SupplyOrder[]>(FALLBACK_SUPPLY);
+  const [messages, setMessages] = useState<MessageRecord[]>([]);
 
-  const loadDashboardData = useCallback(async () => {
-    if (!hospitalInfo.id) return;
-
+  const loadPlatformData = useCallback(async (node?: HospitalInfo) => {
+    const hospital = node ?? hospitalInfo;
+    if (!hospital.id || !supabase) return;
     setIsLoading(true);
-    try {
-      if (!supabase) return;
 
-      const [staffRes, apptRes, legacyApptRes, bedsRes, pharmacyRes, vendorRes] = await Promise.all([
-        supabase
-          .from('hospital_staff_credentials')
-          .select('*')
-          .eq('hospital_id', hospitalInfo.id)
-          .order('created_at', { ascending: false }),
-        supabase.from('appointments').select('*').order('created_at', { ascending: false }),
-        supabase.from('patient_appointments').select('*').order('created_at', { ascending: false }),
-        supabase.from('hospital_beds').select('*').eq('hospital_id', hospitalInfo.id),
-        supabase.from('pharmacy_inventory').select('*').eq('hospital_id', hospitalInfo.id),
-        supabase.from('hospital_vendors').select('*').eq('hospital_id', hospitalInfo.id),
+    try {
+      const [
+        staffRows,
+        appointmentRows,
+        legacyApptRows,
+        queueRows,
+        queueAltRows,
+        patientRows,
+        bedRows,
+        inventoryRows,
+        rxRows,
+        noteRows,
+        emergencyRows,
+        billRows,
+        invoiceRows,
+        poRows,
+        procurementRows,
+        vendorOrderRows,
+        notificationRows,
+        channelRows,
+      ] = await Promise.all([
+        selectRows('hospital_staff_credentials'),
+        selectRows('appointments'),
+        selectRows('patient_appointments'),
+        selectRows('opd_queue'),
+        selectRows('opd_queues'),
+        selectRows('patients'),
+        supabase.from('hospital_beds').select('*').then((res) => (res.error || !res.data ? [] : (res.data as Record<string, unknown>[]))),
+        selectRows('inventory_items'),
+        selectRows('prescriptions'),
+        selectRows('clinical_notes'),
+        selectRows('emergency_triages'),
+        selectRows('bills'),
+        selectRows('billing_invoices'),
+        selectRows('purchase_orders'),
+        selectRows('hospital_procurement_orders'),
+        selectRows('vendor_orders'),
+        selectRows('system_notifications'),
+        selectRows('channel_messages'),
       ]);
 
-      if (!staffRes.error && staffRes.data) {
-        setStaffList(staffRes.data as StaffMember[]);
+      const scopedStaff = staffRows.filter((row) => matchesHospital(row, hospital.id, hospital.name));
+      setStaffMembers(
+        scopedStaff.map((row) => ({
+          id: String(row.id ?? ''),
+          full_name: String(row.full_name ?? ''),
+          staff_type: String(row.staff_type ?? ''),
+          department: String(row.department ?? ''),
+          email: String(row.email ?? ''),
+          temporary_passcode: String(row.temporary_passcode ?? row.passcode ?? ''),
+          portal_access: String(row.portal_access ?? ''),
+          status: String(row.status ?? 'Active'),
+        })),
+      );
+
+      const queueMap = new Map<string, QueueItem>();
+      [...appointmentRows, ...legacyApptRows, ...queueRows, ...queueAltRows]
+        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
+        .forEach((row) => {
+          const mapped = mapQueue(row);
+          if (!queueMap.has(mapped.id)) queueMap.set(mapped.id, mapped);
+        });
+      setOpdQueue(Array.from(queueMap.values()));
+
+      const patients = patientRows
+        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
+        .map((row) => ({
+          id: String(row.id ?? ''),
+          name: String(row.full_name ?? row.name ?? row.patient_name ?? '—'),
+          uhid: String(row.uhid ?? row.id ?? '—'),
+          phone: String(row.phone ?? row.patient_phone ?? '—'),
+          department: String(row.department ?? 'OPD'),
+          status: String(row.status ?? row.admission_status ?? 'active'),
+        }));
+      if (patients.length > 0) {
+        setPatientRegistry(patients);
+      } else {
+        const fromQueue = Array.from(queueMap.values()).map((item) => ({
+          id: item.id,
+          name: item.patient_name,
+          uhid: item.token,
+          phone: '—',
+          department: item.department,
+          status: item.status,
+        }));
+        setPatientRegistry(fromQueue);
       }
 
-      const appointmentRows = [
-        ...((apptRes.data || []) as Record<string, unknown>[]),
-        ...((legacyApptRes.data || []) as Record<string, unknown>[]),
-      ].filter((row) => belongsToHospital(row, hospitalInfo.id, hospitalInfo.name));
-
-      const queueMap = new Map<string, TriageItem>();
-      appointmentRows.forEach((row) => {
-        const mapped = mapAppointmentToTriage(row);
-        if (mapped && !queueMap.has(mapped.id)) queueMap.set(mapped.id, mapped);
-      });
-      setTriageQueue(Array.from(queueMap.values()));
-
-      if (!bedsRes.error && bedsRes.data && bedsRes.data.length > 0) {
-        setBedList(bedsRes.data.map((row, index) => mapBed(row as Record<string, unknown>, index)));
+      if (bedRows.length > 0) {
+        setBedCensus(
+          bedRows.map((row, index) => ({
+            id: String(row.id ?? `BED-${index + 1}`),
+            ward: String(row.ward ?? row.ward_name ?? 'General Ward'),
+            bed: String(row.bed_number ?? row.bed ?? String(index + 1).padStart(2, '0')),
+            status: Boolean(row.is_occupied) || /occup/i.test(String(row.status ?? '')) ? 'Occupied' : 'Available',
+            patient: String(row.patient_name ?? '-'),
+            doc: String(row.doctor ?? row.doctor_name ?? '-'),
+          })),
+        );
       }
 
-      if (!pharmacyRes.error && pharmacyRes.data && pharmacyRes.data.length > 0) {
-        setPharmacyItems(pharmacyRes.data.map((row, index) => mapPharmacy(row as Record<string, unknown>, index)));
+      if (inventoryRows.length > 0) {
+        setPharmacyItems(
+          inventoryRows.map((row) => {
+            const stock = Number(row.quantity_in_stock ?? row.in_stock ?? row.stock ?? 0);
+            const reorder = Number(row.reorder_level ?? 10);
+            return {
+              id: String(row.id ?? row.item_code ?? ''),
+              name: String(row.item_name ?? row.name ?? 'Item'),
+              category: String(row.category ?? 'Medicine'),
+              stock,
+              status: stock <= reorder ? 'Low Stock' : 'In Stock',
+            };
+          }),
+        );
+      } else if (rxRows.length > 0) {
+        setPharmacyItems(
+          rxRows.slice(0, 12).map((row) => ({
+            id: String(row.id ?? ''),
+            name: String(row.medication_name ?? row.patient_name ?? 'Prescription'),
+            category: String(row.status ?? 'Rx'),
+            stock: 1,
+            status: String(row.status ?? 'Pending'),
+          })),
+        );
       }
 
-      if (!vendorRes.error && vendorRes.data && vendorRes.data.length > 0) {
-        setVendorList(vendorRes.data.map((row, index) => mapVendor(row as Record<string, unknown>, index)));
-      }
+      const labs = [...noteRows, ...rxRows]
+        .filter((row) => matchesHospital(row, hospital.id, hospital.name) || !row.hospital_id)
+        .map((row) => ({
+          id: String(row.id ?? ''),
+          patient_name: String(row.patient_name ?? '—'),
+          test: String(row.diagnosis_disease ?? row.clinical_advice ?? row.prescription ?? 'Diagnostic review'),
+          doctor_name: String(row.doctor_name ?? '—'),
+          status: String(row.status ?? 'Reported'),
+          time: relativeTime(String(row.created_at ?? '')),
+        }));
+      setLabOrders(labs.slice(0, 20));
+
+      setEmergencyDesk(
+        emergencyRows.map((row) => ({
+          id: String(row.id ?? ''),
+          patient_name: String(row.patient_name ?? '—'),
+          complaint: String(row.chief_complaint ?? ''),
+          priority: String(row.priority ?? 'P3'),
+          status: String(row.status ?? 'active'),
+          time: relativeTime(String(row.created_at ?? '')),
+        })),
+      );
+
+      const billed = [...billRows, ...invoiceRows]
+        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
+        .map((row) => {
+          const consultation = Number(row.consultation_fee ?? 0);
+          const pharmacy = Number(row.pharmacy_charges ?? 0);
+          const total = Number(row.total_amount ?? consultation + pharmacy);
+          return {
+            id: String(row.id ?? ''),
+            invoice: String(row.invoice_number ?? row.id ?? 'INV'),
+            patient_name: String(row.patient_name ?? '—'),
+            consultation,
+            pharmacy,
+            total,
+            status: String(row.status ?? row.payment_status ?? 'unpaid'),
+          };
+        });
+      setBills(billed);
+
+      const orders = [...poRows, ...procurementRows, ...vendorOrderRows]
+        .filter((row) => matchesHospital(row, hospital.id, hospital.name))
+        .map((row) => ({
+          id: String(row.po_number ?? row.id ?? 'ORD'),
+          vendor: String(row.vendor_name ?? row.vendor ?? 'Vendor'),
+          item: String(row.item_details ?? row.item ?? row.items ?? 'Procurement lot'),
+          amount: inr(Number(row.total_amount ?? row.amount ?? 0)),
+          status: String(row.status ?? 'ISSUED'),
+          time: relativeTime(String(row.updated_at ?? row.created_at ?? '')),
+        }));
+      if (orders.length > 0) setSupplyOrders(orders);
+
+      const inbox = [...notificationRows, ...channelRows].map((row) => ({
+        id: String(row.id ?? ''),
+        title: String(row.title ?? row.subject ?? 'Ecosystem update'),
+        body: String(row.message ?? row.body ?? row.message_text ?? ''),
+        from: String(row.sender_role ?? row.sender_name ?? row.source_app ?? 'system'),
+        target: String(row.target_app ?? row.recipient_type ?? 'hospital'),
+        time: relativeTime(String(row.created_at ?? '')),
+      }));
+      setMessages(inbox.slice(0, 30));
     } catch (err) {
-      console.error('Error loading dashboard:', err);
+      console.error('Failed to sync hospital data:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [hospitalInfo.id, hospitalInfo.name]);
+  }, [hospitalInfo]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -293,80 +484,149 @@ export default function HospitalMasterDashboard() {
       parseActiveSession(localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY)) ||
       parseActiveSession(localStorage.getItem('curasync_admin_session'));
 
-    if (!session?.hospital_id || session.staff_type !== 'Admin') {
+    let hospitalId = session?.hospital_id;
+    let staffType = session?.staff_type;
+    let hospitalName = session?.hospital_name;
+    let adminName = session?.full_name;
+    let adminEmail = session?.email;
+
+    if (!hospitalId) {
+      try {
+        const raw =
+          localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY) ||
+          localStorage.getItem('curasync_admin_session');
+        const parsed = raw ? (JSON.parse(raw) as Record<string, string>) : null;
+        hospitalId = parsed?.hospital_id;
+        staffType = parsed?.staff_type;
+        hospitalName = parsed?.hospital_name || hospitalName;
+        adminName = parsed?.full_name || adminName;
+        adminEmail = parsed?.email || adminEmail;
+      } catch {
+        hospitalId = undefined;
+      }
+    }
+
+    if (!hospitalId || staffType !== 'Admin') {
       router.replace('/admin/login');
       return;
     }
 
     void (async () => {
-      const completed = await isHospitalSetupCompleted(session.hospital_id);
+      const completed = await isHospitalSetupCompleted(hospitalId);
       if (!completed) {
-        router.replace(`/dashboard/staff-credentials?hospitalId=${encodeURIComponent(session.hospital_id)}`);
+        router.replace(`/dashboard/staff-credentials?hospitalId=${encodeURIComponent(hospitalId)}`);
         return;
       }
 
-      setHospitalInfo({
-        id: session.hospital_id,
-        name: session.hospital_name || 'Regal Hospital',
-        city: 'Bengaluru',
-        adminName: session.full_name || 'Hospital Administrator',
-        adminEmail: session.email,
-      });
-      setIsVerifyingGuard(false);
+      const nextInfo: HospitalInfo = {
+        id: hospitalId,
+        nodeCode: nodeCodeFor(hospitalId),
+        name: hospitalName || 'Regal Hospital',
+        adminName: adminName || 'Hospital Administrator',
+        adminEmail: adminEmail || '',
+      };
+      setHospitalInfo(nextInfo);
+      setIsVerifying(false);
     })();
   }, [router]);
 
   useEffect(() => {
-    if (isVerifyingGuard || !hospitalInfo.id) return;
-    void loadDashboardData();
-  }, [isVerifyingGuard, hospitalInfo.id, loadDashboardData]);
+    if (isVerifying || !hospitalInfo.id) return;
+    void loadPlatformData(hospitalInfo);
+  }, [isVerifying, hospitalInfo.id, loadPlatformData, hospitalInfo]);
+
+  useEffect(() => {
+    if (!supabase || isVerifying || !hospitalInfo.id) return;
+
+    let channel = supabase.channel(`regal_hospital_os_${hospitalInfo.id}`);
+    REALTIME_TABLES.forEach((table) => {
+      channel = channel.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+        void loadPlatformData(hospitalInfo);
+      });
+    });
+    channel.subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [hospitalInfo, isVerifying, loadPlatformData]);
+
+  const waitingCount = opdQueue.filter((item) => /wait|schedul|check|token|triage/i.test(item.status)).length;
+  const consultingCount = opdQueue.filter((item) => /consult|progress|exam/i.test(item.status)).length;
+  const completedCount = opdQueue.filter((item) => /complete|done|discharg|prescrib/i.test(item.status)).length;
+  const occupiedBeds = bedCensus.filter((bed) => bed.status === 'Occupied').length;
+  const occupancyRate = bedCensus.length === 0 ? 0 : Math.round((occupiedBeds / bedCensus.length) * 100);
+  const unpaidTotal = bills.filter((bill) => !/paid|settled/i.test(bill.status)).reduce((sum, bill) => sum + bill.total, 0);
+  const collectedTotal = bills.reduce((sum, bill) => sum + bill.total, 0);
+  const emergencyActive = emergencyDesk.filter((item) => !/closed|discharged|resolved/i.test(item.status)).length;
+
+  const filteredStaff = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return staffMembers;
+    return staffMembers.filter(
+      (member) =>
+        member.full_name.toLowerCase().includes(query) ||
+        member.staff_type.toLowerCase().includes(query) ||
+        member.department.toLowerCase().includes(query) ||
+        member.email.toLowerCase().includes(query),
+    );
+  }, [staffMembers, searchQuery]);
+
+  const navLinks: Array<{
+    id: NavModule;
+    label: string;
+    icon: typeof LayoutGrid;
+    badge?: number;
+    badgeColor?: string;
+  }> = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
+    { id: 'smartq', label: 'SmartQ OPD', icon: ListOrdered, badge: opdQueue.length },
+    { id: 'patients', label: 'Patients', icon: Users, badge: patientRegistry.length },
+    { id: 'ipd', label: 'IPD & Bed Census', icon: BedDouble, badge: occupiedBeds },
+    { id: 'pharmacy', label: 'Records & Pharmacy', icon: ClipboardCheck },
+    { id: 'labs', label: 'Diagnostics & Labs', icon: FlaskConical },
+    { id: 'emergency', label: 'Emergency Desk', icon: AlertTriangle, badge: emergencyActive, badgeColor: 'bg-rose-500' },
+    { id: 'billing', label: 'Billing & Cashier', icon: IndianRupee },
+    { id: 'supply', label: 'Supply & Orders', icon: PackageCheck, badge: supplyOrders.length },
+    { id: 'staff', label: 'Doctors & Staff', icon: HeartHandshake, badge: staffMembers.length },
+    { id: 'messages', label: 'Ecosystem Messages', icon: MessageSquareQuote, badge: messages.length },
+  ];
+
+  const openModule = (id: NavModule) => {
+    setActiveTab(id);
+    setMobileNavOpen(false);
+  };
 
   const handleIssueToken = async (event: React.FormEvent) => {
     event.preventDefault();
     const patientName = walkInName.trim();
-    if (!patientName) return;
+    if (!patientName || !supabase) return;
 
     const tokenNumber = `OPD-${Math.floor(100 + Math.random() * 900)}`;
-    const department = activeDepartment === 'All' ? 'General Medicine' : activeDepartment;
-    const assignedDoctor =
-      staffList.find((staff) => staff.staff_type === 'Doctor')?.full_name || 'Chief Medical Officer';
-    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-    const newEntry: TriageItem = {
-      id: tokenNumber,
-      token: tokenNumber,
+    const doctor = staffMembers.find((member) => member.staff_type === 'Doctor');
+    const payload = {
+      hospital_id: hospitalInfo.id,
+      hospital_name: hospitalInfo.name,
       patient_name: patientName,
-      department,
-      assigned_doctor: assignedDoctor,
-      status: 'Waiting in Triage',
-      time,
+      token_number: tokenNumber,
+      department: 'General Medicine',
+      doctor_name: doctor?.full_name || 'Chief Medical Officer',
+      doctor_id: doctor?.id || 'UNASSIGNED',
+      status: 'WAITING',
+      queue_status: 'WAITING',
+      source: 'hospital_dashboard_walkin',
+      appointment_date: new Date().toISOString().slice(0, 10),
+      created_at: new Date().toISOString(),
     };
 
-    setTriageQueue((prev) => [newEntry, ...prev]);
+    const { error } = await supabase.from('appointments').insert([payload]);
+    if (error) {
+      await supabase.from('opd_queue').insert([payload]);
+    }
     setWalkInName('');
     setShowTokenModal(false);
-    toast.success(`Walk-in Token ${tokenNumber} issued successfully!`);
-
-    if (supabase && hospitalInfo.id) {
-      const payload = {
-        hospital_id: hospitalInfo.id,
-        hospital_name: hospitalInfo.name,
-        patient_name: patientName,
-        department,
-        doctor_name: assignedDoctor,
-        assigned_doctor: assignedDoctor,
-        token_number: tokenNumber,
-        token: tokenNumber,
-        status: 'WAITING',
-        queue_status: 'WAITING',
-        source: 'hospital_dashboard_walkin',
-        created_at: new Date().toISOString(),
-      };
-      const { error } = await supabase.from('appointments').insert([payload]);
-      if (error) {
-        await supabase.from('patient_appointments').insert([payload]);
-      }
-    }
+    toast.success(`Walk-in token ${tokenNumber} issued`);
+    void loadPlatformData(hospitalInfo);
   };
 
   const handleLogout = () => {
@@ -374,378 +634,244 @@ export default function HospitalMasterDashboard() {
     router.push('/admin/login');
   };
 
-  const doctorCount = staffList.filter((staff) => staff.staff_type === 'Doctor').length;
-  const occupiedBeds = bedList.filter((bed) => bed.status === 'Occupied').length;
-  const occupancyRate = bedList.length === 0 ? 0 : Math.round((occupiedBeds / bedList.length) * 100);
-
-  const filteredQueue = useMemo(() => {
-    return triageQueue.filter((item) => {
-      const matchesDept = activeDepartment === 'All' || item.department === activeDepartment;
-      const query = searchQuery.trim().toLowerCase();
-      const matchesSearch =
-        !query ||
-        item.patient_name.toLowerCase().includes(query) ||
-        item.token.toLowerCase().includes(query) ||
-        item.assigned_doctor.toLowerCase().includes(query);
-      return matchesDept && matchesSearch;
-    });
-  }, [triageQueue, activeDepartment, searchQuery]);
-
-  const filteredDoctors = useMemo(() => {
-    return staffList.filter((staff) => {
-      if (staff.staff_type !== 'Doctor') return false;
-      return activeDepartment === 'All' || staff.department === activeDepartment;
-    });
-  }, [staffList, activeDepartment]);
-
-  const openModule = (tab: OpsTab) => {
-    setActiveTab(tab);
-    setMobileNavOpen(false);
-  };
-
   const sidebar = (
     <>
-      <div className="p-5 space-y-6">
-        <div className="flex items-center gap-3 border-b border-slate-800 pb-5">
-          <div className="p-2 rounded-xl bg-blue-600 text-white shadow-md shadow-blue-600/30">
-            <Building2 className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-[10px] font-mono font-bold text-blue-400 uppercase tracking-widest">
-              {hospitalInfo.id}
-            </div>
-            <h1 className="text-sm font-black text-white leading-tight truncate max-w-[140px]">
-              {hospitalInfo.name}
-            </h1>
-            <p className="text-[10px] text-slate-400">{hospitalInfo.city}</p>
-          </div>
+      <div className="p-5">
+        <div className="text-[11px] font-extrabold uppercase tracking-widest text-[#2dd4bf] mb-1 font-mono">
+          HOSPITAL APP
         </div>
+        <h1 className="text-lg font-black text-white tracking-tight leading-none">{hospitalInfo.name}</h1>
+        <div className="text-[11px] font-mono text-cyan-300/80 font-bold mt-1">{hospitalInfo.nodeCode}</div>
 
-        <nav className="space-y-1">
-          <div className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider px-3 pb-2">
-            Clinical Modules
-          </div>
-
-          <button type="button" onClick={() => openModule('opd')} className={navButtonClass(activeTab === 'opd')}>
-            <div className="flex items-center gap-2.5">
-              <Activity className="w-4 h-4" />
-              <span>Live OPD &amp; Triage</span>
-            </div>
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-blue-900/60 text-blue-200">
-              {triageQueue.length}
-            </span>
-          </button>
-
-          <button type="button" onClick={() => openModule('doctors')} className={navButtonClass(activeTab === 'doctors')}>
-            <div className="flex items-center gap-2.5">
-              <Stethoscope className="w-4 h-4" />
-              <span>Doctor Schedules</span>
-            </div>
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
-              {doctorCount}
-            </span>
-          </button>
-
-          <button type="button" onClick={() => openModule('beds')} className={navButtonClass(activeTab === 'beds')}>
-            <div className="flex items-center gap-2.5">
-              <BedDouble className="w-4 h-4" />
-              <span>Wards &amp; Bed Alloc</span>
-            </div>
-            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300">
-              {occupancyRate}%
-            </span>
-          </button>
-
-          <button type="button" onClick={() => openModule('pharmacy')} className={navButtonClass(activeTab === 'pharmacy')}>
-            <div className="flex items-center gap-2.5">
-              <Pill className="w-4 h-4" />
-              <span>Pharmacy Inventory</span>
-            </div>
-          </button>
-
-          <button type="button" onClick={() => openModule('vendors')} className={navButtonClass(activeTab === 'vendors')}>
-            <div className="flex items-center gap-2.5">
-              <Truck className="w-4 h-4" />
-              <span>Vendor Supply Chain</span>
-            </div>
-          </button>
+        <nav className="mt-6 space-y-1">
+          {navLinks.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => openModule(item.id)}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-150 cursor-pointer ${
+                  isActive
+                    ? 'bg-[#18537a] text-white shadow-md font-bold'
+                    : 'text-slate-300 hover:text-white hover:bg-[#0e3b5b]/60'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-cyan-300' : 'text-slate-400'}`} />
+                  <span>{item.label}</span>
+                </div>
+                {item.badge !== undefined && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                      item.badgeColor && item.badge > 0
+                        ? `${item.badgeColor} text-white`
+                        : isActive
+                          ? 'bg-cyan-400 text-slate-950'
+                          : 'bg-[#144466] text-cyan-200'
+                    }`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </nav>
+      </div>
 
-        <div className="pt-4 border-t border-slate-800 space-y-2">
-          <div className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-wider px-3">
-            Linked Platform Apps
-          </div>
-
+      <div className="p-4 border-t border-[#124263] bg-[#07253a]/70 space-y-3">
+        <div className="text-[10px] font-mono uppercase font-bold text-cyan-400/90 tracking-wider">
+          Connected Workspaces
+        </div>
+        <div className="grid grid-cols-3 gap-1.5 text-center">
           <button
             type="button"
             onClick={() => window.open('/doctor/login', '_blank')}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
+            className="p-2 rounded-lg bg-[#0e3b5b] hover:bg-[#144970] text-[10px] font-bold text-cyan-200 transition"
           >
-            <div className="flex items-center gap-2">
-              <Stethoscope className="w-3.5 h-3.5 text-blue-400" />
-              <span>Doctor Workspace</span>
-            </div>
-            <ExternalLink className="w-3 h-3 text-slate-500" />
+            Doctor
           </button>
-
           <button
             type="button"
             onClick={() => window.open('/patient/login', '_blank')}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
+            className="p-2 rounded-lg bg-[#0e3b5b] hover:bg-[#144970] text-[10px] font-bold text-emerald-200 transition"
           >
-            <div className="flex items-center gap-2">
-              <Users className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Patient Portal</span>
-            </div>
-            <ExternalLink className="w-3 h-3 text-slate-500" />
+            Patient
           </button>
-
           <button
             type="button"
             onClick={() => window.open('/vendor/login', '_blank')}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
+            className="p-2 rounded-lg bg-[#0e3b5b] hover:bg-[#144970] text-[10px] font-bold text-purple-200 transition"
           >
-            <div className="flex items-center gap-2">
-              <Truck className="w-3.5 h-3.5 text-purple-400" />
-              <span>Vendor Gateway</span>
-            </div>
-            <ExternalLink className="w-3 h-3 text-slate-500" />
+            Vendor
           </button>
-
+        </div>
+        <div className="flex items-center justify-between pt-1">
+          <div className="min-w-0">
+            <div className="text-[11px] font-bold text-white truncate">{hospitalInfo.adminName}</div>
+            <div className="text-[10px] text-slate-400 truncate">{hospitalInfo.adminEmail}</div>
+          </div>
           <button
             type="button"
-            onClick={() => router.push('/dashboard/staff-credentials')}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition cursor-pointer"
+            onClick={handleLogout}
+            className="p-2 rounded-lg text-slate-400 hover:text-rose-300 hover:bg-[#0e3b5b]"
+            title="Sign out"
           >
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-              <span>Staff Vault</span>
-            </div>
-            <ExternalLink className="w-3 h-3 text-slate-500" />
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
-      </div>
-
-      <div className="p-4 border-t border-slate-800 bg-slate-950/50 flex items-center justify-between">
-        <div className="truncate">
-          <div className="text-xs font-bold text-white truncate">{hospitalInfo.adminName}</div>
-          <div className="text-[10px] text-slate-400 truncate">{hospitalInfo.adminEmail}</div>
-        </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="p-2 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
-          title="Sign Out"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
       </div>
     </>
   );
 
-  if (isVerifyingGuard) {
+  if (isVerifying) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans">
+      <div className="min-h-screen bg-[#f1f5f9] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3 text-slate-500">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-          <p className="text-xs font-semibold">Verifying hospital setup status...</p>
+          <Loader2 className="w-8 h-8 animate-spin text-cyan-700" />
+          <p className="text-xs font-semibold">Opening hospital command suite...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex font-sans select-none">
-      <aside className="w-64 bg-slate-900 text-white flex-col justify-between shrink-0 border-r border-slate-800 hidden md:flex">
+    <div className="flex h-screen w-full bg-[#f1f5f9] text-slate-800 font-sans overflow-hidden select-none">
+      <aside className="w-64 bg-[#0a2e47] text-slate-200 hidden md:flex flex-col justify-between shrink-0 shadow-2xl z-30">
         {sidebar}
       </aside>
 
       {mobileNavOpen && (
         <div className="fixed inset-0 z-40 md:hidden">
-          <button
-            type="button"
-            className="absolute inset-0 bg-slate-950/60"
-            aria-label="Close navigation"
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <aside className="relative z-50 h-full w-64 bg-slate-900 text-white flex flex-col justify-between border-r border-slate-800">
+          <button type="button" className="absolute inset-0 bg-slate-950/50" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />
+          <aside className="relative z-50 h-full w-64 bg-[#0a2e47] text-slate-200 flex flex-col justify-between shadow-2xl">
             {sidebar}
           </aside>
         </div>
       )}
 
-      <main className="flex-1 flex flex-col h-screen overflow-y-auto">
-        <header className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 text-white p-6 shadow-md shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setMobileNavOpen(true)}
-                className="md:hidden p-2 rounded-lg bg-slate-800 text-slate-200"
-                aria-label="Open modules"
-              >
-                <Menu className="w-4 h-4" />
-              </button>
-              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-blue-500/20 border border-blue-400/30 text-[10px] font-mono font-bold text-blue-300">
-                <Building2 className="w-3 h-3" />
-                <span>FACILITY NODE: {hospitalInfo.id}</span>
-              </div>
+      <main className="flex-1 flex flex-col h-screen overflow-hidden">
+        <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => setMobileNavOpen(true)} className="md:hidden p-2 rounded-xl border border-slate-200" aria-label="Open modules">
+              <Menu className="w-4 h-4" />
+            </button>
+            <div className="p-2 rounded-xl bg-cyan-50 border border-cyan-200 text-[#0c314b]">
+              <Building2 className="w-5 h-5" />
             </div>
-            <h2 className="text-2xl font-black tracking-tight">{hospitalInfo.name} Operations Command</h2>
-            <p className="text-xs text-slate-400">
-              Logged in: <strong className="text-white">{hospitalInfo.adminName}</strong> • Scoped strictly to your facility data.
-            </p>
+            <div>
+              <h2 className="text-base font-black text-slate-900 leading-tight">
+                {navLinks.find((nav) => nav.id === activeTab)?.label} Command Center
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">
+                Active Node:{' '}
+                <span className="font-mono text-cyan-800 font-bold">
+                  {hospitalInfo.id} ({hospitalInfo.name})
+                </span>
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setShowTokenModal(true)}
-              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-emerald-600/30 transition cursor-pointer"
+              className="hidden sm:inline-flex px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold items-center gap-2"
             >
               <Plus className="w-4 h-4" />
-              <span>Issue OPD Token</span>
+              Issue OPD Token
             </button>
-
             <button
               type="button"
               onClick={() => router.push('/dashboard/staff-credentials')}
-              className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-blue-600/30 transition cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2 shadow-xs transition cursor-pointer"
             >
-              <ShieldCheck className="w-4 h-4" />
-              <span>Staff Vault</span>
+              <Plus className="w-4 h-4" />
+              <span>Provision Staff</span>
             </button>
-
             <button
               type="button"
-              onClick={() => void loadDashboardData()}
-              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer border border-slate-700"
-              title="Sync Platform Data"
+              onClick={() => void loadPlatformData(hospitalInfo)}
+              className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 transition cursor-pointer"
+              title="Sync Platform State"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-4 h-4 text-cyan-600 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </header>
 
-        <div className="p-6 pb-2 grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-blue-50 text-blue-600">
-              <Users className="w-5 h-5" />
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {activeTab === 'dashboard' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Facility Operations Snapshot</h3>
+                <p className="text-xs text-slate-500">Live census across OPD, IPD, pharmacy, billing, and vendor supply.</p>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                  { label: 'Live OPD Queue', value: String(opdQueue.length), hint: `${waitingCount} waiting`, onClick: () => openModule('smartq') },
+                  { label: 'Provisioned Staff', value: String(staffMembers.length), hint: `${staffMembers.filter((s) => s.staff_type === 'Doctor').length} doctors`, onClick: () => openModule('staff') },
+                  { label: 'Bed Occupancy', value: `${occupancyRate}%`, hint: `${occupiedBeds}/${bedCensus.length} occupied`, onClick: () => openModule('ipd') },
+                  { label: 'Collections (₹)', value: inr(collectedTotal), hint: `${inr(unpaidTotal)} outstanding`, onClick: () => openModule('billing') },
+                ].map((card) => (
+                  <button key={card.label} type="button" onClick={card.onClick} className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs text-left hover:border-cyan-300 transition">
+                    <div className="text-xs font-bold text-slate-400 uppercase">{card.label}</div>
+                    <div className="text-3xl font-black text-[#0c314b] mt-1">{card.value}</div>
+                    <div className="text-[11px] text-cyan-700 font-bold mt-1">{card.hint}</div>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div>
-              <div className="text-2xl font-black text-slate-900">{staffList.length}</div>
-              <div className="text-[11px] font-medium text-slate-500 uppercase">Total Provisioned Staff</div>
-            </div>
-          </div>
+          )}
 
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-indigo-50 text-indigo-600">
-              <Stethoscope className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-indigo-700">{doctorCount}</div>
-              <div className="text-[11px] font-medium text-slate-500 uppercase">Clinical Doctors</div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-emerald-50 text-emerald-600">
-              <Activity className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-emerald-700">{triageQueue.length}</div>
-              <div className="text-[11px] font-medium text-slate-500 uppercase">Live OPD Triage Active</div>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center gap-3.5">
-            <div className="p-3 rounded-xl bg-purple-50 text-purple-600">
-              <BedDouble className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="text-2xl font-black text-purple-700">{occupancyRate}%</div>
-              <div className="text-[11px] font-medium text-slate-500 uppercase">Bed Occupancy Rate</div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-4 flex-1">
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            {DEPARTMENTS.map((dept) => (
-              <button
-                key={dept}
-                type="button"
-                onClick={() => setActiveDepartment(dept)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                  activeDepartment === dept
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                {dept}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === 'opd' && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">Live OPD Consultation &amp; Triage Queue</h3>
-                  <p className="text-xs text-slate-500">Realtime outpatient queue synchronized with Doctor Workspace.</p>
+          {activeTab === 'smartq' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">SmartQ Outpatient Triage Registry</h3>
+                <p className="text-xs text-slate-500">Live feed from Patient bookings and Doctor Workspace consultation status.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="text-xs font-bold text-slate-400 uppercase">Waiting in Queue</div>
+                  <div className="text-3xl font-black text-cyan-800 mt-1">{waitingCount || opdQueue.length}</div>
+                  <div className="text-[11px] text-emerald-600 font-bold mt-1">Patient App bookings appear instantly</div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                    <input
-                      value={searchQuery}
-                      onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder="Search token or patient"
-                      className="w-48 rounded-xl border border-slate-200 bg-slate-50 py-2 pl-8 pr-3 text-xs text-slate-800"
-                    />
-                  </div>
-                  <span className="text-xs font-mono font-bold text-blue-600 px-3 py-1 rounded-full bg-blue-50 border border-blue-200">
-                    {filteredQueue.length} Patients Waiting
-                  </span>
+                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="text-xs font-bold text-slate-400 uppercase">Consulting Now</div>
+                  <div className="text-3xl font-black text-blue-700 mt-1">{consultingCount}</div>
+                  <div className="text-[11px] text-blue-600 font-bold mt-1">Doctor Workspace in-progress notes</div>
+                </div>
+                <div className="p-5 bg-white rounded-2xl border border-slate-200 shadow-xs">
+                  <div className="text-xs font-bold text-slate-400 uppercase">Completed Today</div>
+                  <div className="text-3xl font-black text-slate-800 mt-1">{completedCount}</div>
+                  <div className="text-[11px] text-slate-400 font-bold mt-1">Discharged or prescribed</div>
                 </div>
               </div>
-
-              {filteredQueue.length === 0 ? (
-                <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 text-slate-400 space-y-2">
-                  <Clock className="w-8 h-8 mx-auto text-slate-300" />
-                  <div className="text-sm font-bold text-slate-600">No Patients in Triage Queue</div>
-                  <p className="text-xs text-slate-400">
-                    Issue a walk-in OPD token or wait for patient bookings scoped to {hospitalInfo.id}.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowTokenModal(true)}
-                    className="mt-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold cursor-pointer"
-                  >
-                    + Issue First Token
-                  </button>
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400">
-                        <th className="py-3 px-4">Token #</th>
-                        <th className="py-3 px-4">Patient Name</th>
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                {opdQueue.length === 0 ? (
+                  <div className="p-12 text-center text-sm text-slate-500">No live OPD tokens yet. Issue a walk-in or wait for Patient App bookings.</div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                      <tr>
+                        <th className="py-3 px-4">Token</th>
+                        <th className="py-3 px-4">Patient</th>
                         <th className="py-3 px-4">Department</th>
-                        <th className="py-3 px-4">Assigned Clinician</th>
-                        <th className="py-3 px-4">Wait Time</th>
+                        <th className="py-3 px-4">Clinician</th>
+                        <th className="py-3 px-4">Notes</th>
                         <th className="py-3 px-4">Status</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredQueue.map((item) => (
-                        <tr key={item.id} className="hover:bg-slate-50/70 transition">
-                          <td className="py-3 px-4 font-mono font-black text-blue-700">{item.token}</td>
+                      {opdQueue.map((item) => (
+                        <tr key={item.id} className="hover:bg-cyan-50/40">
+                          <td className="py-3 px-4 font-mono font-black text-cyan-800">{item.token}</td>
                           <td className="py-3 px-4 font-bold text-slate-900">{item.patient_name}</td>
                           <td className="py-3 px-4">{item.department}</td>
-                          <td className="py-3 px-4 text-slate-600">{item.assigned_doctor}</td>
-                          <td className="py-3 px-4 font-mono text-slate-400">{item.time}</td>
+                          <td className="py-3 px-4">{item.doctor_name}</td>
+                          <td className="py-3 px-4 text-slate-500 max-w-[220px] truncate">{item.notes || '—'}</td>
                           <td className="py-3 px-4">
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
                               {item.status}
@@ -755,87 +881,72 @@ export default function HospitalMasterDashboard() {
                       ))}
                     </tbody>
                   </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'doctors' && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-base font-black text-slate-900">
-                    Registered Facility Clinicians ({filteredDoctors.length})
-                  </h3>
-                  <p className="text-xs text-slate-500">Doctors verified to log in via the Doctor Portal.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => router.push('/dashboard/staff-credentials')}
-                  className="px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Provision Clinician
-                </button>
+                )}
               </div>
-
-              {filteredDoctors.length === 0 ? (
-                <div className="p-10 text-center rounded-2xl border border-dashed border-slate-200 text-xs text-slate-500">
-                  No clinicians provisioned yet. Open Staff Vault to add doctors.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredDoctors.map((doc) => (
-                    <div key={doc.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-100 text-blue-700">
-                          {doc.id}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          Available
-                        </span>
-                      </div>
-                      <div className="font-bold text-slate-900 text-sm">{doc.full_name}</div>
-                      <div className="text-xs text-slate-500">{doc.department}</div>
-                      <div className="text-[11px] font-mono text-slate-400 truncate">{doc.email}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           )}
 
-          {activeTab === 'beds' && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+          {activeTab === 'patients' && (
+            <div className="space-y-4">
               <div>
-                <h3 className="text-base font-black text-slate-900">Ward Allocations &amp; Bed Registry</h3>
-                <p className="text-xs text-slate-500">Live inpatient occupancy across General, ICU, and Post-Op wards.</p>
+                <h3 className="text-lg font-black text-slate-900">Patient Registry</h3>
+                <p className="text-xs text-slate-500">UHID records synchronized from Patient App bookings and walk-in OPD.</p>
               </div>
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                    <tr>
+                      <th className="py-3 px-4">UHID / Token</th>
+                      <th className="py-3 px-4">Patient</th>
+                      <th className="py-3 px-4">Department</th>
+                      <th className="py-3 px-4">Phone</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {patientRegistry.map((patient) => (
+                      <tr key={patient.id}>
+                        <td className="py-3 px-4 font-mono font-bold text-cyan-800">{patient.uhid}</td>
+                        <td className="py-3 px-4 font-bold">{patient.name}</td>
+                        <td className="py-3 px-4">{patient.department}</td>
+                        <td className="py-3 px-4 font-mono">{patient.phone}</td>
+                        <td className="py-3 px-4">{patient.status}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
+          {activeTab === 'ipd' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Ward &amp; Bed Allocation Census</h3>
+                <p className="text-xs text-slate-500">Real-time occupancy for ICU and general wards.</p>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {bedList.map((bed) => (
-                  <div key={bed.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-3">
+                {bedCensus.map((bed) => (
+                  <div key={bed.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2">
                     <div className="flex items-center justify-between">
-                      <span className="font-mono font-bold text-xs text-slate-900">
-                        {bed.ward} - Bed {bed.bed_number}
+                      <span className="font-bold text-xs text-slate-900">
+                        {bed.ward} ({bed.bed})
                       </span>
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                           bed.status === 'Occupied'
                             ? 'bg-rose-50 text-rose-700 border border-rose-200'
-                            : bed.status === 'Cleaning'
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                              : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         }`}
                       >
                         {bed.status}
                       </span>
                     </div>
                     <div className="text-xs text-slate-500">
-                      Patient: <strong className="text-slate-800">{bed.patient_name}</strong>
+                      Patient: <strong className="text-slate-800">{bed.patient}</strong>
                     </div>
                     <div className="text-xs text-slate-500">
-                      Attending: <strong className="text-slate-800">{bed.doctor}</strong>
+                      Consultant: <strong className="text-slate-800">{bed.doc}</strong>
                     </div>
                   </div>
                 ))}
@@ -844,41 +955,256 @@ export default function HospitalMasterDashboard() {
           )}
 
           {activeTab === 'pharmacy' && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+            <div className="space-y-4">
               <div>
-                <h3 className="text-base font-black text-slate-900">Pharmacy Formulary &amp; Stock</h3>
-                <p className="text-xs text-slate-500">Medication inventory synchronized with doctor e-prescriptions.</p>
+                <h3 className="text-lg font-black text-slate-900">Records &amp; Pharmacy Formulary</h3>
+                <p className="text-xs text-slate-500">Inventory and e-prescriptions shared with Doctor Workspace.</p>
               </div>
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                {pharmacyItems.length === 0 ? (
+                  <div className="p-12 text-center text-sm text-slate-500">No inventory rows yet. Vendor receipts will populate this formulary.</div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                      <tr>
+                        <th className="py-3 px-4">Item</th>
+                        <th className="py-3 px-4">Category</th>
+                        <th className="py-3 px-4">Stock</th>
+                        <th className="py-3 px-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {pharmacyItems.map((item) => (
+                        <tr key={item.id}>
+                          <td className="py-3 px-4 font-bold">{item.name}</td>
+                          <td className="py-3 px-4">{item.category}</td>
+                          <td className="py-3 px-4 font-mono">{item.stock}</td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${item.status === 'Low Stock' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                              {item.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
 
-              <div className="overflow-x-auto">
+          {activeTab === 'labs' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Diagnostics &amp; Labs</h3>
+                <p className="text-xs text-slate-500">Clinical notes and diagnostic orders from Doctor consultations.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
+                {labOrders.length === 0 ? (
+                  <div className="p-12 text-center text-sm text-slate-500">No diagnostic notes yet. They appear when clinicians save consultation records.</div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                      <tr>
+                        <th className="py-3 px-4">Patient</th>
+                        <th className="py-3 px-4">Order / Finding</th>
+                        <th className="py-3 px-4">Clinician</th>
+                        <th className="py-3 px-4">Updated</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {labOrders.map((lab) => (
+                        <tr key={lab.id}>
+                          <td className="py-3 px-4 font-bold">{lab.patient_name}</td>
+                          <td className="py-3 px-4">{lab.test}</td>
+                          <td className="py-3 px-4">{lab.doctor_name}</td>
+                          <td className="py-3 px-4 font-mono text-slate-500">{lab.time}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'emergency' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Emergency Desk</h3>
+                <p className="text-xs text-slate-500">P1–P3 triage board synchronized with Doctor emergency bypass.</p>
+              </div>
+              {emergencyDesk.length === 0 ? (
+                <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
+                  No active emergency triages.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {emergencyDesk.map((item) => (
+                    <div key={item.id} className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-900">{item.patient_name}</span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${item.priority === 'P1' ? 'bg-rose-100 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {item.priority}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600">{item.complaint}</p>
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span>{item.status}</span>
+                        <span className="font-mono">{item.time}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'billing' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Billing &amp; Cashier</h3>
+                <p className="text-xs text-slate-500">Consultation invoices and pharmacy charges in INR, linked to OPD encounters.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="p-5 bg-white rounded-2xl border border-slate-200">
+                  <div className="text-xs font-bold text-slate-400 uppercase">Gross Collections</div>
+                  <div className="text-2xl font-black text-slate-900 mt-1">{inr(collectedTotal)}</div>
+                </div>
+                <div className="p-5 bg-white rounded-2xl border border-slate-200">
+                  <div className="text-xs font-bold text-slate-400 uppercase">Outstanding</div>
+                  <div className="text-2xl font-black text-amber-700 mt-1">{inr(unpaidTotal)}</div>
+                </div>
+                <div className="p-5 bg-white rounded-2xl border border-slate-200">
+                  <div className="text-xs font-bold text-slate-400 uppercase">Invoices</div>
+                  <div className="text-2xl font-black text-cyan-800 mt-1">{bills.length}</div>
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
+                {bills.length === 0 ? (
+                  <div className="p-12 text-center text-sm text-slate-500">No invoices yet. They post when consultations complete.</div>
+                ) : (
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] font-black uppercase text-slate-500">
+                      <tr>
+                        <th className="py-3 px-4">Invoice</th>
+                        <th className="py-3 px-4">Patient</th>
+                        <th className="py-3 px-4">Consult</th>
+                        <th className="py-3 px-4">Pharmacy</th>
+                        <th className="py-3 px-4">Total</th>
+                        <th className="py-3 px-4">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {bills.map((bill) => (
+                        <tr key={bill.id}>
+                          <td className="py-3 px-4 font-mono font-bold text-cyan-800">{bill.invoice}</td>
+                          <td className="py-3 px-4 font-bold">{bill.patient_name}</td>
+                          <td className="py-3 px-4">{inr(bill.consultation)}</td>
+                          <td className="py-3 px-4">{inr(bill.pharmacy)}</td>
+                          <td className="py-3 px-4 font-black">{inr(bill.total)}</td>
+                          <td className="py-3 px-4">{bill.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'supply' && (
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-lg font-black text-slate-900">Procurement &amp; Vendor Dispatch</h3>
+                <p className="text-xs text-slate-500">Hospital purchase requests update when vendors acknowledge or fulfill in the Vendor Portal.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {supplyOrders.map((ord) => (
+                  <div key={ord.id} className="p-5 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono text-xs font-bold text-cyan-800">{ord.id}</span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-50 text-cyan-700 border border-cyan-200">
+                        {ord.status}
+                      </span>
+                    </div>
+                    <div>
+                      <div className="font-bold text-slate-900 text-sm">{ord.item}</div>
+                      <div className="text-xs text-slate-500">{ord.vendor}</div>
+                    </div>
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-slate-800">{ord.amount}</span>
+                      <span className="text-[10px] text-slate-400 font-mono">{ord.time}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'staff' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Hospital Staff Directory &amp; Keyring</h3>
+                  <p className="text-xs text-slate-500">Live credentials from Staff Vault, scoped to {hospitalInfo.id}.</p>
+                </div>
+                <div className="relative w-full sm:w-72">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder="Search doctor, staff or department..."
+                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-cyan-600"
+                  />
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-xs">
                 <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[10px] font-black uppercase text-slate-400">
-                      <th className="py-3 px-4">Item Code</th>
-                      <th className="py-3 px-4">Medicine Name</th>
-                      <th className="py-3 px-4">Therapeutic Category</th>
-                      <th className="py-3 px-4">Current Stock</th>
-                      <th className="py-3 px-4">Inventory Status</th>
+                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                    <tr>
+                      <th className="py-3 px-4">Staff ID &amp; Name</th>
+                      <th className="py-3 px-4">Designation &amp; Dept</th>
+                      <th className="py-3 px-4">Login Email</th>
+                      <th className="py-3 px-4">Passcode Key</th>
+                      <th className="py-3 px-4">Target Workspace</th>
+                      <th className="py-3 px-4 text-right">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {pharmacyItems.map((med) => (
-                      <tr key={med.id} className="hover:bg-slate-50 transition">
-                        <td className="py-3 px-4 font-mono font-bold text-slate-700">{med.id}</td>
-                        <td className="py-3 px-4 font-bold text-slate-900">{med.name}</td>
-                        <td className="py-3 px-4 text-slate-500">{med.category}</td>
-                        <td className="py-3 px-4 font-mono font-bold text-slate-800">
-                          {med.stock} {med.unit}
+                    {filteredStaff.map((member) => (
+                      <tr key={member.id} className="hover:bg-cyan-50/40 transition">
+                        <td className="py-3.5 px-4 font-medium">
+                          <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 mr-2">
+                            {member.id}
+                          </span>
+                          <span className="font-bold text-slate-900">{member.full_name}</span>
                         </td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                              med.status === 'Low Stock'
-                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            }`}
+                        <td className="py-3.5 px-4">
+                          <span className="font-semibold text-slate-700">{member.staff_type}</span>
+                          <span className="text-slate-400 block text-[11px]">{member.department}</span>
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-slate-600">{member.email}</td>
+                        <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1"
+                            onClick={() => {
+                              if (member.temporary_passcode) {
+                                void navigator.clipboard.writeText(member.temporary_passcode);
+                                toast.success('Passcode copied');
+                              }
+                            }}
                           >
-                            {med.status}
+                            {member.temporary_passcode || '—'}
+                            <Copy className="w-3 h-3 text-slate-400" />
+                          </button>
+                        </td>
+                        <td className="py-3.5 px-4 font-mono text-[11px] text-slate-500">{member.portal_access}</td>
+                        <td className="py-3.5 px-4 text-right">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            {member.status || 'Active'}
                           </span>
                         </td>
                       </tr>
@@ -889,31 +1215,32 @@ export default function HospitalMasterDashboard() {
             </div>
           )}
 
-          {activeTab === 'vendors' && (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-4">
+          {activeTab === 'messages' && (
+            <div className="space-y-4">
               <div>
-                <h3 className="text-base font-black text-slate-900">Procurement &amp; Vendor Partners</h3>
-                <p className="text-xs text-slate-500">Connected pharmaceutical and biomedical logistics channels.</p>
+                <h3 className="text-lg font-black text-slate-900">Ecosystem Messages</h3>
+                <p className="text-xs text-slate-500">Cross-app notifications from Doctor, Patient, and Vendor workspaces.</p>
               </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {vendorList.map((vendor) => (
-                  <div key={vendor.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs font-bold text-purple-700">{vendor.id}</span>
-                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                        {vendor.status}
-                      </span>
+              {messages.length === 0 ? (
+                <div className="p-12 text-center rounded-2xl border border-dashed border-slate-200 bg-white text-sm text-slate-500">
+                  No ecosystem messages yet.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {messages.map((message) => (
+                    <div key={message.id} className="p-4 rounded-2xl bg-white border border-slate-200 shadow-xs">
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="text-sm font-black text-slate-900">{message.title}</h4>
+                        <span className="text-[10px] font-mono text-slate-400">{message.time}</span>
+                      </div>
+                      <p className="text-xs text-slate-600 mt-1">{message.body}</p>
+                      <div className="mt-2 text-[10px] font-bold uppercase tracking-wider text-cyan-700">
+                        {message.from} → {message.target}
+                      </div>
                     </div>
-                    <div className="font-bold text-slate-900 text-sm">{vendor.name}</div>
-                    <div className="text-xs text-slate-500">{vendor.category}</div>
-                    <div className="text-xs text-slate-600 flex items-center gap-1 pt-1">
-                      <Phone className="w-3 h-3 text-slate-400" />
-                      <span>{vendor.contact}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -921,12 +1248,9 @@ export default function HospitalMasterDashboard() {
 
       {showTokenModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-          <form
-            onSubmit={handleIssueToken}
-            className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl p-6 space-y-4"
-          >
+          <form onSubmit={handleIssueToken} className="w-full max-w-md rounded-2xl bg-white p-6 space-y-4 border border-slate-200">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-black text-slate-900 uppercase">Issue Walk-In OPD Token</h2>
+              <h2 className="text-sm font-black uppercase">Issue Walk-In OPD Token</h2>
               <button type="button" onClick={() => setShowTokenModal(false)} className="p-1.5 rounded-lg hover:bg-slate-100">
                 <X className="w-4 h-4" />
               </button>
@@ -938,13 +1262,7 @@ export default function HospitalMasterDashboard() {
               placeholder="Patient full name"
               className="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm"
             />
-            <p className="text-[11px] text-slate-500">
-              Department: <strong>{activeDepartment === 'All' ? 'General Medicine' : activeDepartment}</strong>
-            </p>
-            <button
-              type="submit"
-              className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs uppercase tracking-wider"
-            >
+            <button type="submit" className="w-full py-3 rounded-xl bg-emerald-600 text-white text-xs font-black uppercase">
               Confirm &amp; Issue Token
             </button>
           </form>
