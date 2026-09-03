@@ -19,7 +19,6 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { generateEnterprisePasscode } from '@/lib/generatePasscode';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -174,15 +173,24 @@ export default function SuperAdminHospitalBlocksDashboard() {
       return;
     }
     setModalError(null);
-    setAdminPasscode(
-      generateEnterprisePasscode(
-        'Admin',
-        'Hospital Administration',
-        adminName.trim(),
-        newHospId.trim().toUpperCase() || 'HOSP-01',
-        newHospName.trim() || 'Regal Hospital Main',
-      ),
-    );
+
+    const cleanHosp =
+      newHospName
+        .replace(/hospital|super|speciality|clinic|care|institute|center/gi, '')
+        .trim()
+        .split(/\s+/)[0]
+        ?.toUpperCase() || 'HOSP';
+
+    const trimmedName = adminName.trim();
+    const nameParts = trimmedName.replace(/^(Dr\.|Mr\.|Mrs\.|Ms\.)\s+/i, '').split(/\s+/);
+    const firstInit = nameParts[0]?.charAt(0).toUpperCase() || 'A';
+    const lastInit = (
+      nameParts.length > 1 ? nameParts[nameParts.length - 1].charAt(0) : 'X'
+    ).toUpperCase();
+    const initials = `${firstInit}${lastInit}`;
+    const nameLength = trimmedName.length || 8;
+
+    setAdminPasscode(`${cleanHosp}#2026@${initials}${nameLength}`);
   };
 
   const handleOnboardSubmit = async (e: React.FormEvent) => {
@@ -650,7 +658,7 @@ export default function SuperAdminHospitalBlocksDashboard() {
                       required
                       value={adminPasscode}
                       onChange={(e) => setAdminPasscode(e.target.value)}
-                      placeholder="Click Generate (e.g. OPS-AC-RS26-A413)"
+                      placeholder="Click Generate (e.g. REGAL#2026@AS13)"
                       className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-purple-800 font-mono font-bold"
                     />
                   </div>
