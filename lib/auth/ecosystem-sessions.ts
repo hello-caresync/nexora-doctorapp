@@ -39,10 +39,19 @@ export function parseJsonSession<T>(raw: string | null): T | null {
 
 import { setNexoraRoleCookie } from '@/lib/auth/role-cookies';
 
+const COOKIE_ATTRS = 'path=/; max-age=86400; SameSite=Lax';
+
+function mirrorSessionCookie(name: string, payload: string): void {
+  if (typeof document === 'undefined') return;
+  document.cookie = `${name}=${encodeURIComponent(payload)}; ${COOKIE_ATTRS}`;
+}
+
 export function persistStaffPortalSession(session: StaffPortalSession): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(SESSION_KEYS.staff, JSON.stringify(session));
+  const payload = JSON.stringify(session);
+  localStorage.setItem(SESSION_KEYS.staff, payload);
   setNexoraRoleCookie('staff');
+  mirrorSessionCookie(SESSION_KEYS.staff, payload);
 }
 
 export function getStaffPortalSession(): StaffPortalSession | null {
@@ -52,8 +61,10 @@ export function getStaffPortalSession(): StaffPortalSession | null {
 
 export function persistVendorSession(session: VendorSession): void {
   if (typeof window === 'undefined') return;
-  localStorage.setItem(SESSION_KEYS.vendor, JSON.stringify(session));
+  const payload = JSON.stringify(session);
+  localStorage.setItem(SESSION_KEYS.vendor, payload);
   setNexoraRoleCookie('vendor');
+  mirrorSessionCookie(SESSION_KEYS.vendor, payload);
 }
 
 export function getVendorSession(): VendorSession | null {

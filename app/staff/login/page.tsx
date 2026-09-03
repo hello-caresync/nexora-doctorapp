@@ -61,9 +61,13 @@ function HospitalStaffLoginForm() {
 
     const activeSession = getStaffPortalSession();
     if (activeSession && activeSession.staff_type !== 'Admin') {
-      router.replace(
-        redirectUrl || resolveStaffDepartmentRoute(activeSession.staff_type),
-      );
+      const safeRedirect =
+        redirectUrl &&
+        redirectUrl !== '/staff/login' &&
+        !redirectUrl.startsWith('/staff/login')
+          ? redirectUrl
+          : null;
+      router.replace(safeRedirect || resolveStaffDepartmentRoute(activeSession.staff_type));
       return;
     }
 

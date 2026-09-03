@@ -82,8 +82,25 @@ function isProtectedPath(pathname: string): boolean {
   );
 }
 
+const PUBLIC_AUTH_PATHS = [
+  '/login',
+  '/admin/login',
+  '/admin/onboarding',
+  '/doctor/login',
+  '/staff/login',
+  '/patient/login',
+  '/patient/auth/login',
+  '/vendor/login',
+  '/ops/platform-root',
+  '/super-admin/login',
+];
+
 function isPublicAuthPath(pathname: string): boolean {
-  return pathname.startsWith('/login') || pathname.startsWith('/admin/onboarding');
+  if (pathname.startsWith('/login/forgot-password')) return true;
+  if (pathname.startsWith('/login/reset-password')) return true;
+  return PUBLIC_AUTH_PATHS.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
 }
 
 function shouldUpdateSession(prev: HospitalStaffProfile | null, next: HospitalStaffProfile): boolean {
@@ -223,7 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       typeof window !== 'undefined' ? localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY) : null,
     );
 
-    if (isProtectedPath(pathname) && !session && !activeSession) {
+    if (isProtectedPath(pathname) && !isPublicAuthPath(pathname) && !session && !activeSession) {
       router.replace(`${APP_ROUTES.login}?redirect=${encodeURIComponent(pathname)}`);
       return;
     }

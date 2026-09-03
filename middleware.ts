@@ -1,81 +1,130 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const NEXORA_ROLE_COOKIE = 'nexora_role';
-
-type GuardRule = {
-  prefix: string;
-  requiredRole: string;
-  loginPath: string;
-  publicPaths: string[];
-};
-
-const GUARD_RULES: GuardRule[] = [
-  {
-    prefix: '/dashboard',
-    requiredRole: 'admin',
-    loginPath: '/admin/login',
-    publicPaths: [],
-  },
-  {
-    prefix: '/doctor',
-    requiredRole: 'doctor',
-    loginPath: '/doctor/login',
-    publicPaths: ['/doctor/login'],
-  },
-  {
-    prefix: '/staff',
-    requiredRole: 'staff',
-    loginPath: '/staff/login',
-    publicPaths: ['/staff/login'],
-  },
-  {
-    prefix: '/patient',
-    requiredRole: 'patient',
-    loginPath: '/patient/login',
-    publicPaths: ['/patient/login', '/patient/auth/login'],
-  },
-  {
-    prefix: '/vendor',
-    requiredRole: 'vendor',
-    loginPath: '/vendor/login',
-    publicPaths: ['/vendor/login'],
-  },
-  {
-    prefix: '/super-admin',
-    requiredRole: 'super_admin',
-    loginPath: '/ops/platform-root',
-    publicPaths: [],
-  },
+const PUBLIC_PATHS = [
+  '/',
+  '/login',
+  '/admin/login',
+  '/doctor/login',
+  '/staff/login',
+  '/patient/login',
+  '/patient/auth/login',
+  '/vendor/login',
+  '/ops/platform-root',
+  '/super-admin/login',
+  '/favicon.ico',
 ];
+
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.some(
+    (path) => pathname === path || pathname.startsWith(`${path}/`),
+  );
+}
 
 function isPublicAsset(pathname: string): boolean {
   return (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/api') ||
-    pathname === '/favicon.ico' ||
     pathname.includes('.')
+  );
+}
+
+function hasStaffAuth(request: NextRequest): boolean {
+  return Boolean(
+    request.cookies.get('curasync_staff_session')?.value ||
+      request.cookies.get('nexora_role')?.value === 'staff',
+  );
+}
+
+function hasAdminAuth(request: NextRequest): boolean {
+  return Boolean(
+    request.cookies.get('curasync_admin_session')?.value ||
+      request.cookies.get('curasync_active_session')?.value ||
+      request.cookies.get('nexora_role')?.value === 'admin',
+  );
+}
+
+function hasDoctorAuth(request: NextRequest): boolean {
+  return Boolean(
+    request.cookies.get('curasync_doctor_session')?.value ||
+      request.cookies.get('active_doctor_session')?.value ||
+      request.cookies.get('nexora_role')?.value === 'doctor',
+  );
+}
+
+function hasPatientAuth(request: NextRequest): boolean {
+  return Boolean(
+    request.cookies.get('curasync_patient_session')?.value ||
+      request.cookies.get('nexora_role')?.value === 'patient',
+  );
+}
+
+function hasVendorAuth(request: NextRequest): boolean {
+  return Boolean(
+    request.cookies.get('curasync_vendor_session')?.value ||
+      request.cookies.get('nexora_role')?.value === 'vendor',
+  );
+}
+
+function hasSuperAdminAuth(request: NextRequest): boolean {
+  return Boolean(
+    request.cookies.get('nexora_superadmin_session')?.value ||
+      request.cookies.get('nexora_role')?.value === 'super_admin',
   );
 }
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (isPublicAsset(pathname)) {
+  if (isPublicAsset(pathname) || isPublicPath(pathname)) {
     return NextResponse.next();
   }
 
-  const role = request.cookies.get(NEXORA_ROLE_COOKIE)?.value;
-
-  for (const rule of GUARD_RULES) {
-    if (!pathname.startsWith(rule.prefix)) continue;
-    if (rule.publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
-      return NextResponse.next();
+  if (pathname.startsWith('/staff')) {
+    if (!hasStaffAuth(request)) {
+      const loginUrl = new URL('/staff/login', request.url);
+      if (pathname !== '/staff/login') {
+        loginUrl.searchParams.set('redirect', pathname);
+      }
+      return NextResponse.redirect(loginUrl);
     }
+  }
 
-    if (role !== rule.requiredRole) {
-      const loginUrl = request.nextUrl.clone();
-      loginUrl.pathname = rule.loginPath;
+  if (pathname.startsWith('/dashboard') || pathname.startsWith('/admin')) {
+    if (!hasAdminAuth(request)) {
+      const loginUrl = new URL('/admin/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  if (pathname.startsWith('/doctor')) {
+    if (!hasDoctorAuth(request)) {
+      const loginUrl = new URL('/doctor/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  if (pathname.startsWith('/patient')) {
+    if (!hasPatientAuth(request)) {
+      const loginUrl = new URL('/patient/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  if (pathname.startsWith('/vendor')) {
+    if (!hasVendorAuth(request)) {
+      const loginUrl = new URL('/vendor/login', request.url);
+      loginUrl.searchParams.set('redirect', pathname);
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  if (pathname.startsWith('/super-admin')) {
+    if (!hasSuperAdminAuth(request)) {
+      const loginUrl = new URL('/ops/platform-root', request.url);
       loginUrl.searchParams.set('redirect', pathname);
       return NextResponse.redirect(loginUrl);
     }
@@ -87,6 +136,7 @@ export function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     '/dashboard/:path*',
+    '/admin/:path*',
     '/doctor/:path*',
     '/staff/:path*',
     '/patient/:path*',

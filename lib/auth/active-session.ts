@@ -43,8 +43,14 @@ export function resolveOperationalStaffRoute(portalAccess: string): string {
 export function persistActiveSession(session: ActiveStaffSession): void {
   if (typeof window === 'undefined') return;
 
-  localStorage.setItem(CURASYNC_ACTIVE_SESSION_KEY, JSON.stringify(session));
+  const attrs = 'path=/; max-age=86400; SameSite=Lax';
+  const sessionPayload = JSON.stringify(session);
+
+  localStorage.setItem(CURASYNC_ACTIVE_SESSION_KEY, sessionPayload);
   setNexoraRoleCookie('admin');
+
+  document.cookie = `curasync_admin_session=${encodeURIComponent(sessionPayload)}; ${attrs}`;
+  document.cookie = `curasync_active_session=${encodeURIComponent(sessionPayload)}; ${attrs}`;
 
   const cookiePayload = encodeURIComponent(
     JSON.stringify({
@@ -53,7 +59,6 @@ export function persistActiveSession(session: ActiveStaffSession): void {
       loggedInAt: new Date().toISOString(),
     }),
   );
-  const attrs = 'path=/; max-age=86400; SameSite=Lax';
   document.cookie = `curasync_session=${cookiePayload}; ${attrs}`;
   document.cookie = `auth-token=authenticated; ${attrs}`;
   document.cookie = `sb-access-token=authenticated; ${attrs}`;
