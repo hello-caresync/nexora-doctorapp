@@ -75,14 +75,15 @@ const PROTECTED_PREFIXES = [
 const ACTIVITY_PERSIST_INTERVAL_MS = 30_000;
 
 function isProtectedPath(pathname: string): boolean {
+  if (pathname === '/') return false;
   if (pathname.startsWith('/admin/onboarding')) return false;
-  if (pathname === '/') return true;
   return PROTECTED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 }
 
 const PUBLIC_AUTH_PATHS = [
+  '/',
   '/login',
   '/admin/login',
   '/admin/onboarding',

@@ -12,8 +12,8 @@ function LegacyLoginRedirectInner() {
     const redirect = searchParams.get('redirect');
     const qs = searchParams.toString();
 
-    // Prevent /login <-> /staff/login redirect loops
-    if (redirect === '/staff/login' || redirect?.startsWith('/staff/login')) {
+    // Prevent /login <-> /staff/login redirect loops and never bounce the root gateway
+    if (redirect === '/' || redirect === '/staff/login' || redirect?.startsWith('/staff/login')) {
       router.replace('/staff/login');
       return;
     }
