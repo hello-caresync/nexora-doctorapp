@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   Crown,
   Building2,
@@ -23,6 +24,10 @@ import {
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { generateEnterprisePasscode } from '@/lib/generatePasscode';
+import {
+  parseSuperAdminSession,
+  SUPER_ADMIN_SESSION_KEY,
+} from '@/lib/auth/super-admin-session';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -172,6 +177,8 @@ async function onboardHospitalDirect(payload: {
 }
 
 export default function SuperAdminHospitalBlocksDashboard() {
+  const router = useRouter();
+  const [authReady, setAuthReady] = useState(false);
   const [hospitals, setHospitals] = useState<HospitalEntity[]>([]);
   const [credentials, setCredentials] = useState<StaffCredential[]>([]);
   const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null);
@@ -232,6 +239,16 @@ export default function SuperAdminHospitalBlocksDashboard() {
   }, []);
 
   useEffect(() => {
+    const session = parseSuperAdminSession(localStorage.getItem(SUPER_ADMIN_SESSION_KEY));
+    if (!session) {
+      router.replace('/platform-ops-x92/auth');
+      return;
+    }
+    setAuthReady(true);
+  }, [router]);
+
+  useEffect(() => {
+    if (!authReady) return;
     void loadPlatformData();
 
     if (!supabase) return;
@@ -257,7 +274,7 @@ export default function SuperAdminHospitalBlocksDashboard() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [loadPlatformData]);
+  }, [authReady, loadPlatformData]);
 
   const generateDeterministicAdminPasscode = () => {
     if (!adminName.trim()) {

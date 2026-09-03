@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   UserPlus,
   ShieldCheck,
@@ -17,9 +17,11 @@ import {
   AlertCircle,
   ArrowRight,
   ArrowUpRight,
+  Truck,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { generateEnterprisePasscode } from '@/lib/generatePasscode';
+import { markHospitalSetupCompleted } from '@/lib/auth/admin-setup';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -68,8 +70,14 @@ function nextStaffId(
   return `${hospitalPrefix}-${rolePrefix}${String(sameRoleCount + 1).padStart(2, '0')}`;
 }
 
-export default function MandatoryStaffSetupPage() {
+type SetupTab = 'staff' | 'vendors';
+
+function StaffCredentialsContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const hospitalIdParam = searchParams.get('hospitalId');
+
+  const [activeTab, setActiveTab] = useState<SetupTab>('staff');
 
   const [currentHospital, setCurrentHospital] = useState<{ id: string; name: string }>({
     id: 'HOSP-01',
@@ -89,13 +97,20 @@ export default function MandatoryStaffSetupPage() {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('+91 98450 ');
   const [temporaryPasscode, setTemporaryPasscode] = useState('');
+  const [vendorForm, setVendorForm] = useState({
+    vendorName: '',
+    email: '',
+    category: 'Pharmaceuticals',
+    passcode: '',
+  });
+  const [vendorMessage, setVendorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const stored = localStorage.getItem('curasync_active_session');
     if (!stored) {
-      router.replace('/login');
+      router.replace('/admin/login');
       return;
     }
 
@@ -107,13 +122,13 @@ export default function MandatoryStaffSetupPage() {
       };
       if (session?.hospital_id) {
         setCurrentHospital({
-          id: session.hospital_id,
+          id: hospitalIdParam || session.hospital_id,
           name: session.hospital_name || 'Hospital Node',
         });
         setAdminName(session.full_name || 'Hospital Admin');
       }
     } catch {
-      router.replace('/login');
+      router.replace('/admin/login');
     }
   }, [router]);
 
@@ -198,13 +213,32 @@ export default function MandatoryStaffSetupPage() {
 
     if (supabase) {
       try {
-        const { error } = await supabase.from('hospital_staff_credentials').upsert(
-          { ...newStaff, is_logged_in: false },
+        const payload = { ...newStaff, is_logged_in: false };
+        const { error } = await supabase
+          .from('hospital_staff_credentials')
+          .upsert(payload, { onConflict: 'email' });
+        if (error) console.warn('Credential save warning:', error.message);
+
+        const { error: memberError } = await supabase.from('staff_members').upsert(
+          {
+            id: newStaff.id,
+            hospital_id: newStaff.hospital_id,
+            hospital_name: newStaff.hospital_name,
+            full_name: newStaff.full_name,
+            staff_type: newStaff.staff_type,
+            department: newStaff.department,
+            email: newStaff.email,
+            passcode: newStaff.temporary_passcode,
+            temporary_passcode: newStaff.temporary_passcode,
+            phone: newStaff.phone,
+            portal_access: newStaff.portal_access,
+            status: newStaff.status,
+          },
           { onConflict: 'email' },
         );
-        if (error) console.error('Supabase save error:', error);
+        if (memberError) console.warn('staff_members save warning:', memberError.message);
       } catch (err) {
-        console.error('Supabase save error:', err);
+        console.warn('Staff provisioning save exception:', err);
       }
     }
 
@@ -229,7 +263,7 @@ export default function MandatoryStaffSetupPage() {
       return;
     }
 
-    localStorage.setItem(`setup_completed_${currentHospital.id}`, 'true');
+    void markHospitalSetupCompleted(currentHospital.id);
     router.replace('/dashboard');
   };
 
@@ -294,6 +328,73 @@ export default function MandatoryStaffSetupPage() {
           </div>
         )}
 
+        <div className="flex gap-2 border-b border-slate-200 pb-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('staff')}
+            className={`rounded-lg px-4 py-2 text-xs font-bold ${activeTab === 'staff' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}
+          >
+            Clinical Staff
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('vendors')}
+            className={`rounded-lg px-4 py-2 text-xs font-bold inline-flex items-center gap-1.5 ${activeTab === 'vendors' ? 'bg-orange-600 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}
+          >
+            <Truck className="w-3.5 h-3.5" /> Vendors & Procurement
+          </button>
+        </div>
+
+        {activeTab === 'vendors' && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs space-y-4">
+            <h2 className="text-sm font-bold uppercase text-slate-900">Provision Vendor Access</h2>
+            {vendorMessage && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+                {vendorMessage}
+              </div>
+            )}
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!supabase) return;
+                const payload = {
+                  id: crypto.randomUUID(),
+                  hospital_id: currentHospital.id,
+                  vendor_name: vendorForm.vendorName.trim(),
+                  category: vendorForm.category,
+                  email: vendorForm.email.trim().toLowerCase(),
+                  passcode: vendorForm.passcode.trim(),
+                  status: 'active',
+                };
+                const { error } = await supabase.from('hospital_vendors').upsert(payload, {
+                  onConflict: 'email',
+                });
+                if (error) {
+                  setVendorMessage(`Vendor save warning: ${error.message}`);
+                  return;
+                }
+                setVendorMessage(`Vendor ${payload.vendor_name} provisioned successfully.`);
+                setVendorForm({ vendorName: '', email: '', category: 'Pharmaceuticals', passcode: '' });
+              }}
+              className="grid gap-3 md:grid-cols-2"
+            >
+              <input required value={vendorForm.vendorName} onChange={(e) => setVendorForm((p) => ({ ...p, vendorName: e.target.value }))} placeholder="Company name" className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs" />
+              <input required type="email" value={vendorForm.email} onChange={(e) => setVendorForm((p) => ({ ...p, email: e.target.value }))} placeholder="Vendor rep email" className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs" />
+              <select value={vendorForm.category} onChange={(e) => setVendorForm((p) => ({ ...p, category: e.target.value }))} className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs">
+                <option>Pharmaceuticals</option>
+                <option>Surgical Implants</option>
+                <option>Diagnostic Consumables</option>
+                <option>Biomedical Equipment</option>
+              </select>
+              <input required value={vendorForm.passcode} onChange={(e) => setVendorForm((p) => ({ ...p, passcode: e.target.value }))} placeholder="Vendor passcode" className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-mono" />
+              <button type="submit" className="md:col-span-2 rounded-xl bg-orange-600 py-3 text-xs font-bold text-white uppercase">
+                Provision Vendor Portal Access
+              </button>
+            </form>
+          </div>
+        )}
+
+        {activeTab === 'staff' && (
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
           <div className="xl:col-span-4 rounded-2xl bg-white border border-slate-200 p-6 shadow-2xs space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
@@ -505,7 +606,22 @@ export default function MandatoryStaffSetupPage() {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
+  );
+}
+
+export default function StaffCredentialsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+          Loading setup workspace...
+        </div>
+      }
+    >
+      <StaffCredentialsContent />
+    </Suspense>
   );
 }

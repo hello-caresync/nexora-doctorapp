@@ -2,28 +2,26 @@
 
 import { EcosystemRouteGuard } from '@/components/auth/EcosystemRouteGuard';
 import { getVendorSession } from '@/lib/auth/ecosystem-sessions';
-import { FileText, Package, Receipt, Truck } from 'lucide-react';
+import { Package, FileText, Truck, Receipt } from 'lucide-react';
 
-function VendorPortalContent() {
+function VendorWorkspaceContent() {
   const vendor = getVendorSession();
 
   const cards = [
-    { title: 'Supply Orders', value: '12 Active', icon: FileText, tone: 'text-blue-600 bg-blue-50' },
-    { title: 'Purchase Requisitions', value: '7 Pending', icon: Package, tone: 'text-teal-600 bg-teal-50' },
-    { title: 'Delivery Status', value: '5 In Transit', icon: Truck, tone: 'text-indigo-600 bg-indigo-50' },
-    { title: 'Invoice Queue', value: '3 Awaiting', icon: Receipt, tone: 'text-amber-600 bg-amber-50' },
+    { title: 'Open Purchase Orders', value: '12', icon: FileText, tone: 'text-blue-600 bg-blue-50' },
+    { title: 'Medicine Batch Shipments', value: '5 In Transit', icon: Truck, tone: 'text-teal-600 bg-teal-50' },
+    { title: 'Pending Invoices', value: '3', icon: Receipt, tone: 'text-amber-600 bg-amber-50' },
+    { title: 'Catalog SKUs Active', value: '148', icon: Package, tone: 'text-indigo-600 bg-indigo-50' },
   ];
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 font-sans sm:p-10">
       <div className="mx-auto max-w-6xl space-y-8">
         <div className="rounded-3xl border border-orange-200 bg-white p-8 shadow-sm">
-          <p className="text-[10px] font-bold tracking-widest text-orange-600 uppercase">Vendor Portal</p>
-          <h1 className="mt-2 text-3xl font-black text-slate-900">
-            {vendor?.company_name ?? vendor?.vendor_name ?? 'Vendor Partner'}
-          </h1>
+          <p className="text-[10px] font-bold tracking-widest text-orange-600 uppercase">Vendor Workspace</p>
+          <h1 className="mt-2 text-3xl font-black text-slate-900">{vendor?.company_name ?? 'Vendor Partner'}</h1>
           <p className="mt-1 text-sm text-slate-500">
-            {vendor?.rep_email ?? vendor?.email} • {vendor?.category ?? 'General Supplies'}
+            {vendor?.rep_email} • {vendor?.category ?? 'General Supplies'}
           </p>
         </div>
 
@@ -55,10 +53,10 @@ function VendorPortalContent() {
   );
 }
 
-export default function VendorPortalPage() {
+export default function VendorWorkspacePage() {
   return (
     <EcosystemRouteGuard role="vendor" loginPath="/vendor/login">
-      <VendorPortalContent />
+      <VendorWorkspaceContent />
     </EcosystemRouteGuard>
   );
 }

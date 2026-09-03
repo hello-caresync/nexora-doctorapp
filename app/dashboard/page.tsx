@@ -16,14 +16,16 @@ import {
   Search,
   Loader2,
   X,
+  Truck,
 } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
+import { isHospitalSetupCompleted } from '@/lib/auth/admin-setup';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
-type DashboardTab = 'queue' | 'doctors' | 'wards' | 'pharmacy';
+type DashboardTab = 'queue' | 'doctors' | 'wards' | 'pharmacy' | 'vendors';
 
 interface StaffMember {
   id: string;
@@ -164,43 +166,53 @@ export default function CompleteHospitalOperationsDashboard() {
     doctorName: '',
     chiefComplaint: '',
   });
+  const [vendorForm, setVendorForm] = useState({
+    companyName: '',
+    repEmail: '',
+    category: 'Pharmaceuticals',
+    passcode: '',
+  });
+  const [vendorMessage, setVendorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const stored = localStorage.getItem('curasync_active_session');
     if (!stored) {
-      router.replace('/login');
+      router.replace('/admin/login');
       return;
     }
 
-    try {
-      const session = JSON.parse(stored) as {
-        hospital_id?: string;
-        hospital_name?: string;
-        full_name?: string;
-      };
+    void (async () => {
+      try {
+        const session = JSON.parse(stored) as {
+          hospital_id?: string;
+          hospital_name?: string;
+          full_name?: string;
+          staff_type?: string;
+        };
 
-      if (!session?.hospital_id) {
-        router.replace('/login');
-        return;
+        if (!session?.hospital_id || session.staff_type !== 'Admin') {
+          router.replace('/admin/login');
+          return;
+        }
+
+        const completed = await isHospitalSetupCompleted(session.hospital_id);
+        if (!completed) {
+          router.replace('/dashboard/staff-credentials');
+          return;
+        }
+
+        setCurrentHospital({
+          id: session.hospital_id,
+          name: session.hospital_name || 'Hospital Facility Node',
+        });
+        setAdminName(session.full_name || 'Hospital Administrator');
+        setIsVerifyingGuard(false);
+      } catch {
+        router.replace('/admin/login');
       }
-
-      const isSetupCompleted = localStorage.getItem(`setup_completed_${session.hospital_id}`);
-      if (!isSetupCompleted) {
-        router.replace('/dashboard/staff-credentials');
-        return;
-      }
-
-      setCurrentHospital({
-        id: session.hospital_id,
-        name: session.hospital_name || 'Hospital Facility Node',
-      });
-      setAdminName(session.full_name || 'Hospital Administrator');
-      setIsVerifyingGuard(false);
-    } catch {
-      router.replace('/login');
-    }
+    })();
   }, [router]);
 
   const loadHospitalData = useCallback(async () => {
@@ -514,6 +526,7 @@ export default function CompleteHospitalOperationsDashboard() {
               { id: 'doctors' as const, label: 'Doctor Schedule & Status', icon: Stethoscope },
               { id: 'wards' as const, label: 'Ward & Bed Occupancy', icon: Bed },
               { id: 'pharmacy' as const, label: 'Pharmacy Dispense', icon: Pill },
+              { id: 'vendors' as const, label: 'Vendors', icon: Truck },
             ] as const
           ).map((tab) => {
             const Icon = tab.icon;
@@ -761,6 +774,87 @@ export default function CompleteHospitalOperationsDashboard() {
                 <div className="text-xs text-emerald-600">Fulfilled Today</div>
               </div>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'vendors' && (
+          <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
+            <div className="border-b border-slate-100 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 uppercase">Vendor Provisioning</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Create vendor portal credentials for {currentHospital.name}.
+              </p>
+            </div>
+            {vendorMessage && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-800">
+                {vendorMessage}
+              </div>
+            )}
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                if (!supabase || !currentHospital.id) return;
+                const payload = {
+                  id: `VND-${Date.now()}`,
+                  hospital_id: currentHospital.id,
+                  company_name: vendorForm.companyName.trim(),
+                  rep_email: vendorForm.repEmail.trim().toLowerCase(),
+                  category: vendorForm.category,
+                  passcode: vendorForm.passcode.trim(),
+                  temporary_passcode: vendorForm.passcode.trim(),
+                  status: 'Active',
+                };
+                const { error } = await supabase.from('hospital_vendors').upsert(payload, {
+                  onConflict: 'rep_email',
+                });
+                if (error) {
+                  setVendorMessage(`Vendor save warning: ${error.message}`);
+                  return;
+                }
+                setVendorMessage(`Provisioned vendor ${payload.company_name} successfully.`);
+                setVendorForm({ companyName: '', repEmail: '', category: 'Pharmaceuticals', passcode: '' });
+              }}
+              className="grid gap-3 md:grid-cols-2"
+            >
+              <input
+                required
+                value={vendorForm.companyName}
+                onChange={(e) => setVendorForm((p) => ({ ...p, companyName: e.target.value }))}
+                placeholder="Company name"
+                className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs"
+              />
+              <input
+                required
+                type="email"
+                value={vendorForm.repEmail}
+                onChange={(e) => setVendorForm((p) => ({ ...p, repEmail: e.target.value }))}
+                placeholder="Vendor rep email"
+                className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs"
+              />
+              <select
+                value={vendorForm.category}
+                onChange={(e) => setVendorForm((p) => ({ ...p, category: e.target.value }))}
+                className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs"
+              >
+                <option>Pharmaceuticals</option>
+                <option>Surgical Supplies</option>
+                <option>Diagnostics</option>
+                <option>General Equipment</option>
+              </select>
+              <input
+                required
+                value={vendorForm.passcode}
+                onChange={(e) => setVendorForm((p) => ({ ...p, passcode: e.target.value }))}
+                placeholder="Vendor passcode"
+                className="rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-mono"
+              />
+              <button
+                type="submit"
+                className="md:col-span-2 rounded-xl bg-orange-600 py-3 text-xs font-bold text-white uppercase"
+              >
+                Provision Vendor Portal Access
+              </button>
+            </form>
           </div>
         )}
       </div>

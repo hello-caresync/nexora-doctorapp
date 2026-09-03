@@ -6,7 +6,7 @@ export const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, s
 
 export interface AuthenticatedUserPayload {
   id: string;
-  hospital_id: string;
+  hospital_id: string | null;
   hospital_name: string;
   full_name: string;
   staff_type: 'Doctor' | 'Nurse' | 'Receptionist' | 'Pharmacist' | 'Admin';
@@ -26,15 +26,26 @@ const HOSPITAL_NAMES: Record<string, string> = {
   'RH-BLR-01': 'Regal Hospital Main',
 };
 
-export function resolveCredentialHospitalId(rawId: string | null | undefined): string {
-  const id = (rawId ?? 'HOSP-01').trim();
+const GLOBAL_HOSPITAL_PREFIXES = ['PLATFORM', 'GLOBAL', 'ROOT'];
+
+function shouldNullHospitalId(hospitalId?: string | null): boolean {
+  if (!hospitalId) return true;
+  const upper = hospitalId.trim().toUpperCase();
+  return GLOBAL_HOSPITAL_PREFIXES.some((prefix) => upper.startsWith(prefix));
+}
+
+export function resolveCredentialHospitalId(rawId: string | null | undefined): string | null {
+  if (!rawId?.trim()) return null;
+  const id = rawId.trim();
+  if (shouldNullHospitalId(id)) return null;
   return HOSPITAL_CODE_ALIASES[id] ?? id;
 }
 
 export function resolveCredentialHospitalName(
-  hospitalId: string,
+  hospitalId: string | null,
   fallback = 'Regal Hospital Main',
 ): string {
+  if (!hospitalId) return 'Regal Platform Root';
   return HOSPITAL_NAMES[hospitalId] ?? fallback;
 }
 
@@ -74,18 +85,20 @@ export function mapMemberRoleToStaffType(
   }
 }
 
-export async function recordRealStaffLogin(user: AuthenticatedUserPayload) {
+/** Non-blocking audit log — never throws; FK-safe for global/platform accounts. */
+export async function recordRealStaffLogin(user: AuthenticatedUserPayload): Promise<void> {
   if (!supabase) {
-    console.warn('Supabase client not initialized. Skipping DB record.');
-    return null;
+    console.warn('Supabase client not initialized. Skipping staff credential audit log.');
+    return;
   }
 
-  const { data, error } = await supabase
-    .from('hospital_staff_credentials')
-    .upsert(
+  try {
+    const resolvedHospitalId = resolveCredentialHospitalId(user.hospital_id);
+
+    const { error } = await supabase.from('hospital_staff_credentials').upsert(
       {
         id: user.id,
-        hospital_id: user.hospital_id,
+        hospital_id: resolvedHospitalId,
         hospital_name: user.hospital_name,
         full_name: user.full_name,
         staff_type: user.staff_type,
@@ -101,10 +114,10 @@ export async function recordRealStaffLogin(user: AuthenticatedUserPayload) {
       { onConflict: 'email' },
     );
 
-  if (error) {
-    console.error('Failed to log live staff credential to database:', error.message);
-    throw error;
+    if (error) {
+      console.warn('Non-blocking staff credential log warning:', error.message);
+    }
+  } catch (err) {
+    console.warn('Non-blocking staff credential log exception:', err);
   }
-
-  return data;
 }

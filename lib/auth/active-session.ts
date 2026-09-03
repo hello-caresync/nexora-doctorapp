@@ -1,3 +1,5 @@
+import { setNexoraRoleCookie } from './role-cookies';
+
 export const CURASYNC_ACTIVE_SESSION_KEY = 'curasync_active_session';
 export const ADMIN_PROVISIONING_PATH = '/dashboard/staff-credentials';
 
@@ -31,10 +33,18 @@ export function resolvePostLoginRoute(staffType: string, portalAccess: string): 
   return portalAccess || '/dashboard';
 }
 
+/** Operational staff never route to the admin credential provisioning screen. */
+export function resolveOperationalStaffRoute(portalAccess: string): string {
+  const route = portalAccess || '/dashboard';
+  if (route === ADMIN_PROVISIONING_PATH) return '/dashboard';
+  return route;
+}
+
 export function persistActiveSession(session: ActiveStaffSession): void {
   if (typeof window === 'undefined') return;
 
   localStorage.setItem(CURASYNC_ACTIVE_SESSION_KEY, JSON.stringify(session));
+  setNexoraRoleCookie('admin');
 
   const cookiePayload = encodeURIComponent(
     JSON.stringify({

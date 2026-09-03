@@ -1,0 +1,238 @@
+import { createClient } from '@supabase/supabase-js';
+import {
+  buildWhitelistedSuperAdminUser,
+  isWhitelistedSuperAdminEmail,
+  passesSuperAdminPasscodeCheck,
+} from './super-admin-auth';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+
+/** Primary table name in spec; falls back to legacy hospital_staff_credentials. */
+const STAFF_TABLES = ['staff_members', 'hospital_staff_credentials'] as const;
+
+export type StaffCredentialRecord = {
+  id: string;
+  hospital_id: string;
+  hospital_name: string;
+  full_name: string;
+  staff_type: string;
+  department: string;
+  email: string;
+  temporary_passcode: string;
+  phone?: string;
+  portal_access: string;
+  status?: string;
+};
+
+export type PortalAuthScope = 'super_admin' | 'hospital_admin' | 'operational_staff';
+
+export type PortalAuthResult =
+  | { ok: true; user: StaffCredentialRecord }
+  | { ok: false; error: string };
+
+function normalizeRecord(row: Record<string, unknown>): StaffCredentialRecord {
+  return {
+    id: String(row.id ?? ''),
+    hospital_id: String(row.hospital_id ?? ''),
+    hospital_name: String(row.hospital_name ?? 'Regal Hospital Main'),
+    full_name: String(row.full_name ?? ''),
+    staff_type: String(row.staff_type ?? ''),
+    department: String(row.department ?? ''),
+    email: String(row.email ?? '').toLowerCase(),
+    temporary_passcode: String(row.temporary_passcode ?? row.passcode ?? ''),
+    phone: row.phone ? String(row.phone) : undefined,
+    portal_access: String(row.portal_access ?? '/dashboard'),
+    status: row.status ? String(row.status) : undefined,
+  };
+}
+
+export function isSuperAdminCredential(user: StaffCredentialRecord): boolean {
+  if (isWhitelistedSuperAdminEmail(user.email)) return true;
+  const portal = user.portal_access.toLowerCase();
+  const hospitalId = user.hospital_id.toUpperCase();
+  return (
+    user.staff_type === 'SuperAdmin' ||
+    portal.startsWith('/super-admin') ||
+    hospitalId.startsWith('PLATFORM')
+  );
+}
+
+function matchesScope(user: StaffCredentialRecord, scope: PortalAuthScope): boolean {
+  if (scope === 'super_admin') return isSuperAdminCredential(user);
+  if (scope === 'hospital_admin') {
+    return user.staff_type === 'Admin' && !isSuperAdminCredential(user);
+  }
+  return user.staff_type !== 'Admin' && !isSuperAdminCredential(user);
+}
+
+async function lookupStaffByEmail(email: string): Promise<StaffCredentialRecord | null> {
+  if (!supabase) return null;
+
+  const cleanEmail = email.trim().toLowerCase();
+
+  for (const table of STAFF_TABLES) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .eq('email', cleanEmail)
+      .maybeSingle();
+
+    if (!error && data) {
+      return normalizeRecord(data as Record<string, unknown>);
+    }
+  }
+
+  return null;
+}
+
+async function authenticateSuperAdminLogin(
+  cleanEmail: string,
+  cleanPasscode: string,
+): Promise<PortalAuthResult> {
+  if (isWhitelistedSuperAdminEmail(cleanEmail)) {
+    const existing = await lookupStaffByEmail(cleanEmail);
+
+    if (!passesSuperAdminPasscodeCheck(cleanPasscode, existing?.temporary_passcode)) {
+      return { ok: false, error: 'Invalid security passcode. Please verify your credentials.' };
+    }
+
+    if (existing?.status === 'Restricted') {
+      return {
+        ok: false,
+        error: 'This account has been restricted. Contact your hospital administrator.',
+      };
+    }
+
+    return {
+      ok: true,
+      user: buildWhitelistedSuperAdminUser(cleanEmail, cleanPasscode, existing),
+    };
+  }
+
+  const user = await lookupStaffByEmail(cleanEmail);
+  if (!user) {
+    return { ok: false, error: 'No account found with this email address.' };
+  }
+
+  if (!isSuperAdminCredential(user)) {
+    return { ok: false, error: 'This account is not authorized for Super Admin access.' };
+  }
+
+  if (user.status === 'Restricted') {
+    return {
+      ok: false,
+      error: 'This account has been restricted. Contact your hospital administrator.',
+    };
+  }
+
+  if (user.temporary_passcode !== cleanPasscode) {
+    return { ok: false, error: 'Invalid security passcode. Please verify your credentials.' };
+  }
+
+  return { ok: true, user };
+}
+
+export async function authenticatePortalCredential(params: {
+  email: string;
+  passcode: string;
+  hospitalId?: string;
+  scope: PortalAuthScope;
+}): Promise<PortalAuthResult> {
+  const cleanEmail = params.email.trim().toLowerCase();
+  const cleanPasscode = params.passcode.trim();
+
+  if (!cleanEmail || !cleanPasscode) {
+    return { ok: false, error: 'Please enter both your official email and security passcode.' };
+  }
+
+  if (params.scope === 'super_admin') {
+    return authenticateSuperAdminLogin(cleanEmail, cleanPasscode);
+  }
+
+  if (!supabase) {
+    return { ok: false, error: 'Database client unavailable. Please check configuration.' };
+  }
+
+  const user = await lookupStaffByEmail(cleanEmail);
+  if (!user) {
+    return { ok: false, error: 'No account found with this email address.' };
+  }
+
+  if (!matchesScope(user, params.scope)) {
+    if (params.scope === 'hospital_admin') {
+      return { ok: false, error: 'This account is not a Hospital Admin credential. Use the Staff portal.' };
+    }
+    return {
+      ok: false,
+      error: 'Hospital Admin accounts must sign in through the Hospital Admin portal.',
+    };
+  }
+
+  if (params.hospitalId && user.hospital_id !== params.hospitalId) {
+    return { ok: false, error: 'This account is not registered under the selected hospital tenant.' };
+  }
+
+  if (user.status === 'Restricted') {
+    return { ok: false, error: 'This account has been restricted. Contact your hospital administrator.' };
+  }
+
+  if (user.temporary_passcode !== cleanPasscode) {
+    return { ok: false, error: 'Invalid security passcode. Please verify your credentials.' };
+  }
+
+  return { ok: true, user };
+}
+
+export async function loadHospitalOptionsForLogin(): Promise<
+  { id: string; name: string; location: string }[]
+> {
+  const fallback = [
+    { id: 'HOSP-01', name: 'Regal Hospital Main', location: 'Bengaluru' },
+    { id: 'HOSP-02', name: 'Apollo Super Speciality', location: 'Bengaluru' },
+    { id: 'HOSP-03', name: 'Manipal Health Institute', location: 'Bengaluru' },
+  ];
+
+  if (!supabase) return fallback;
+
+  const { data: tenants } = await supabase
+    .from('hospital_tenants')
+    .select('hospital_id, hospital_name, city')
+    .order('hospital_name', { ascending: true });
+
+  if (tenants?.length) {
+    return tenants.map((row) => ({
+      id: String(row.hospital_id),
+      name: String(row.hospital_name),
+      location: String(row.city ?? 'Bengaluru'),
+    }));
+  }
+
+  for (const table of STAFF_TABLES) {
+    const { data: credentials } = await supabase
+      .from(table)
+      .select('hospital_id, hospital_name')
+      .order('hospital_name', { ascending: true });
+
+    if (credentials?.length) {
+      const seen = new Set<string>();
+      const options = credentials
+        .filter((row) => {
+          const id = String(row.hospital_id);
+          if (seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        })
+        .map((row) => ({
+          id: String(row.hospital_id),
+          name: String(row.hospital_name),
+          location: 'Bengaluru',
+        }));
+
+      if (options.length > 0) return options;
+    }
+  }
+
+  return fallback;
+}

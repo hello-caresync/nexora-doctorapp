@@ -37,7 +37,7 @@ export default function PatientLayout({ children }: { children: ReactNode }) {
       ensurePatientIdPersisted();
 
       if (!session && !savedName) {
-        router.replace('/patient/auth/login');
+        router.replace('/patient/login');
         return;
       }
 

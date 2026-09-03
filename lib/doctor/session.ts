@@ -1,3 +1,5 @@
+import { setNexoraRoleCookie } from '@/lib/auth/role-cookies';
+
 export interface DoctorSession {
   doctorId: string;
   doctorName: string;
@@ -119,6 +121,8 @@ export function saveDoctorSession(session: DoctorSession, remember = true): void
   } else {
     localStorage.removeItem(SESSION_KEY);
   }
+
+  setNexoraRoleCookie('doctor');
 
   dispatchSessionChanged(payload);
 }

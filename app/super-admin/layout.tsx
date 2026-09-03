@@ -3,9 +3,9 @@
 import type { ReactNode } from 'react';
 import { EcosystemRouteGuard } from '@/components/auth/EcosystemRouteGuard';
 
-export default function DashboardLayout({ children }: { children: ReactNode }) {
+export default function SuperAdminLayout({ children }: { children: ReactNode }) {
   return (
-    <EcosystemRouteGuard role="admin" loginPath="/admin/login">
+    <EcosystemRouteGuard role="superadmin" loginPath="/ops/platform-root">
       {children}
     </EcosystemRouteGuard>
   );
