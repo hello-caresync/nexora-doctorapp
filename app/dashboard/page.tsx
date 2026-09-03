@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Activity,
@@ -8,7 +8,9 @@ import {
   BedDouble,
   Building2,
   CheckCircle2,
+  ChevronRight,
   ClipboardCheck,
+  Clock,
   HeartHandshake,
   IndianRupee,
   LayoutGrid,
@@ -17,10 +19,14 @@ import {
   LogOut,
   Menu,
   PackageCheck,
+  Phone,
   Pill,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
+  Stethoscope,
+  TicketPlus,
   Users,
   X,
 } from 'lucide-react';
@@ -69,14 +75,36 @@ type StaffRow = {
   status?: string;
 };
 
+type TriageStage = 'Waiting' | 'In Consultation' | 'Completed';
+
 type QueueRow = {
   id: string;
   token: string;
+  uhid: string;
   patient_name: string;
   department: string;
   phone: string;
   doctor_name: string;
   status: string;
+  created_at: string;
+  appointment_date: string;
+  source_table: string;
+  gender: string;
+  age: number | null;
+};
+
+type PatientProfile = {
+  id: string;
+  uhid: string;
+  patient_name: string;
+  phone: string;
+  department: string;
+  visits: number;
+  last_encounter: string;
+  first_registered: string;
+  gender: string;
+  age: number | null;
+  record_status: string;
 };
 
 type PharmacyRow = {
@@ -131,6 +159,164 @@ function inr(amount: number): string {
 
 function nodeCodeFor(hospitalId: string): string {
   return hospitalId;
+}
+
+const OPD_DEPARTMENTS = [
+  'General Medicine',
+  'Cardiology',
+  'Neurology',
+  'Orthopedics',
+  'Pediatrics',
+  'Dermatology',
+  'ENT',
+  'Obstetrics & Gynecology',
+] as const;
+
+function mintOpdToken(): string {
+  return `NX-OPD-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+function triageStage(status: string): TriageStage {
+  const value = status.toLowerCase();
+  if (/complete|done|discharged|closed/.test(value)) return 'Completed';
+  if (/consult|in.?room|called|exam/.test(value)) return 'In Consultation';
+  return 'Waiting';
+}
+
+function waitMinutes(isoDate: string): number | null {
+  if (!isoDate) return null;
+  const stamp = new Date(isoDate).getTime();
+  if (!Number.isFinite(stamp)) return null;
+  return Math.max(0, Math.round((Date.now() - stamp) / 60000));
+}
+
+function formatWait(isoDate: string): string {
+  const mins = waitMinutes(isoDate);
+  if (mins == null) return '—';
+  if (mins < 1) return '<1m';
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+function formatEncounter(isoDate: string): string {
+  if (!isoDate) return '—';
+  const date = new Date(isoDate);
+  if (!Number.isFinite(date.getTime())) return '—';
+  return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function mapQueueRow(row: Record<string, unknown>, sourceTable: string): QueueRow | null {
+  const id = String(row.id ?? row.token_number ?? row.uhid ?? '');
+  if (!id) return null;
+  const ageRaw = row.age ?? row.patient_age;
+  return {
+    id,
+    token: String(row.token_number ?? row.uhid ?? row.token ?? row.id ?? ''),
+    uhid: String(row.uhid ?? row.token_number ?? row.id ?? ''),
+    patient_name: String(row.patient_name ?? row.name ?? ''),
+    department: String(row.department ?? 'General Medicine'),
+    phone: String(row.phone ?? row.patient_phone ?? ''),
+    doctor_name: String(row.doctor_name ?? 'Unassigned'),
+    status: String(row.status ?? row.queue_status ?? 'Waiting'),
+    created_at: String(row.created_at ?? ''),
+    appointment_date: String(row.appointment_date ?? row.created_at ?? ''),
+    source_table: sourceTable,
+    gender: String(row.gender ?? row.sex ?? ''),
+    age: ageRaw == null || ageRaw === '' ? null : Number(ageRaw),
+  };
+}
+
+function patientKey(name: string, phone: string, uhid: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length >= 10) return `phone:${digits.slice(-10)}`;
+  if (name.trim()) return `name:${name.trim().toLowerCase()}`;
+  return `uhid:${uhid}`;
+}
+
+function buildPatientDirectory(queue: QueueRow[], extraPatients: Record<string, unknown>[]): PatientProfile[] {
+  const directory = new Map<string, PatientProfile>();
+
+  const upsert = (input: {
+    id: string;
+    uhid: string;
+    patient_name: string;
+    phone: string;
+    department: string;
+    created_at: string;
+    gender: string;
+    age: number | null;
+    visits?: number;
+  }) => {
+    const key = patientKey(input.patient_name, input.phone, input.uhid);
+    const existing = directory.get(key);
+    if (!existing) {
+      directory.set(key, {
+        id: input.id,
+        uhid: input.uhid,
+        patient_name: input.patient_name,
+        phone: input.phone,
+        department: input.department,
+        visits: input.visits ?? 1,
+        last_encounter: input.created_at,
+        first_registered: input.created_at,
+        gender: input.gender,
+        age: input.age,
+        record_status: 'Verified Profile',
+      });
+      return;
+    }
+    existing.visits += input.visits ?? 1;
+    if (input.created_at && (!existing.last_encounter || input.created_at > existing.last_encounter)) {
+      existing.last_encounter = input.created_at;
+      existing.department = input.department || existing.department;
+    }
+    if (input.created_at && (!existing.first_registered || input.created_at < existing.first_registered)) {
+      existing.first_registered = input.created_at;
+    }
+    if (!existing.gender && input.gender) existing.gender = input.gender;
+    if (existing.age == null && input.age != null) existing.age = input.age;
+    if (existing.uhid.startsWith('NX-OPD-') && input.uhid && !input.uhid.startsWith('NX-OPD-')) {
+      existing.uhid = input.uhid;
+    }
+  };
+
+  for (const visit of queue) {
+    upsert({
+      id: visit.id,
+      uhid: visit.uhid,
+      patient_name: visit.patient_name,
+      phone: visit.phone,
+      department: visit.department,
+      created_at: visit.created_at || visit.appointment_date,
+      gender: visit.gender,
+      age: visit.age,
+    });
+  }
+
+  for (const row of extraPatients) {
+    upsert({
+      id: String(row.id ?? row.uhid ?? ''),
+      uhid: String(row.uhid ?? row.id ?? ''),
+      patient_name: String(row.full_name ?? row.patient_name ?? row.name ?? ''),
+      phone: String(row.phone ?? row.mobile ?? ''),
+      department: String(row.department ?? 'General Outpatient'),
+      created_at: String(row.created_at ?? row.last_visit_at ?? ''),
+      gender: String(row.gender ?? row.sex ?? ''),
+      age: row.age == null || row.age === '' ? null : Number(row.age),
+      visits: Number(row.visit_count ?? 0) || 1,
+    });
+  }
+
+  return Array.from(directory.values()).map((patient) => {
+    const daysSince = waitMinutes(patient.last_encounter);
+    const record_status =
+      daysSince != null && daysSince <= 30 * 24 * 60
+        ? 'Active Chart'
+        : patient.visits > 1
+          ? 'Longitudinal Chart'
+          : 'Verified Profile';
+    return { ...patient, record_status };
+  });
 }
 
 async function selectScoped(table: string, hospitalId: string): Promise<Record<string, unknown>[]> {
@@ -202,12 +388,19 @@ export default function HospitalMasterDashboard() {
 
   const [staffMembers, setStaffMembers] = useState<StaffRow[]>([]);
   const [opdQueue, setOpdQueue] = useState<QueueRow[]>([]);
+  const [masterPatients, setMasterPatients] = useState<Record<string, unknown>[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [genderFilter, setGenderFilter] = useState('all');
+  const [ageFilter, setAgeFilter] = useState('all');
+  const [advancingTokenId, setAdvancingTokenId] = useState<string | null>(null);
   const [pharmacyItems, setPharmacyItems] = useState<PharmacyRow[]>([]);
   const [beds, setBeds] = useState<BedRow[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [supplyOrders, setSupplyOrders] = useState<SupplyRow[]>([]);
   const [emergencies, setEmergencies] = useState<EmergencyRow[]>([]);
 
+  const [isSubmittingToken, setIsSubmittingToken] = useState(false);
+  const [opdTokenPreview, setOpdTokenPreview] = useState(mintOpdToken);
   const [opdForm, setOpdForm] = useState({ patientName: '', department: 'General Medicine', phone: '' });
   const [medForm, setMedForm] = useState({ name: '', category: 'Medicine', stock: 100 });
   const [bedForm, setBedForm] = useState({ ward: 'General Ward', bedNumber: '', patientName: '' });
@@ -224,6 +417,8 @@ export default function HospitalMasterDashboard() {
         aptRows,
         opdRows,
         patientAptRows,
+        patientRows,
+        hospitalPatientRows,
         pharmRows,
         inventoryRows,
         bedRows,
@@ -238,6 +433,8 @@ export default function HospitalMasterDashboard() {
         selectScoped('appointments', hospitalId),
         selectScoped('hospital_opd_queue', hospitalId),
         selectScoped('patient_appointments', hospitalId),
+        selectScoped('patients', hospitalId),
+        selectScoped('hospital_patients', hospitalId),
         selectScoped('hospital_pharmacy_inventory', hospitalId),
         selectScoped('inventory_items', hospitalId),
         selectScoped('hospital_beds', hospitalId),
@@ -262,24 +459,20 @@ export default function HospitalMasterDashboard() {
         })),
       );
 
-      const queueSource = [...aptRows, ...opdRows, ...patientAptRows];
+      const queueSource = [
+        ...opdRows.map((row) => mapQueueRow(row, 'hospital_opd_queue')),
+        ...aptRows.map((row) => mapQueueRow(row, 'appointments')),
+        ...patientAptRows.map((row) => mapQueueRow(row, 'patient_appointments')),
+      ];
       const seenQueueIds = new Set<string>();
       setOpdQueue(
         queueSource.flatMap((row) => {
-          const id = String(row.id ?? row.token_number ?? row.uhid ?? '');
-          if (!id || seenQueueIds.has(id)) return [];
-          seenQueueIds.add(id);
-          return [{
-            id,
-            token: String(row.token_number ?? row.uhid ?? row.token ?? row.id ?? ''),
-            patient_name: String(row.patient_name ?? row.name ?? ''),
-            department: String(row.department ?? 'OPD'),
-            phone: String(row.phone ?? row.patient_phone ?? ''),
-            doctor_name: String(row.doctor_name ?? ''),
-            status: String(row.status ?? row.queue_status ?? 'Waiting'),
-          }];
+          if (!row || seenQueueIds.has(row.id)) return [];
+          seenQueueIds.add(row.id);
+          return [row];
         }),
       );
+      setMasterPatients([...patientRows, ...hospitalPatientRows]);
 
       const pharmacySource = pharmRows.length > 0 ? pharmRows : inventoryRows;
       setPharmacyItems(
@@ -396,54 +589,101 @@ export default function HospitalMasterDashboard() {
     };
   }, [hospitalInfo.id, isVerifying, loadPlatformData]);
 
-  const closeModal = () => setActiveModal(null);
+  const closeModal = () => {
+    setIsSubmittingToken(false);
+    setActiveModal(null);
+  };
+
+  useEffect(() => {
+    if (activeModal !== 'opd') return;
+    setOpdTokenPreview(mintOpdToken());
+    setIsSubmittingToken(false);
+  }, [activeModal]);
 
   const handleIssueToken = async (event: React.FormEvent) => {
     event.preventDefault();
     const patientName = opdForm.patientName.trim();
-    if (!patientName) return;
-    const tokenNum = `NX-OPD-${Math.floor(1000 + Math.random() * 9000)}`;
+    if (!patientName || isSubmittingToken) return;
+
+    const tokenNum = opdTokenPreview || mintOpdToken();
+    const phoneDigits = opdForm.phone.replace(/\D/g, '').slice(0, 10);
+    const phone = phoneDigits ? `+91 ${phoneDigits}` : null;
     const doctorName = staffMembers.find((s) => s.staff_type === 'Doctor')?.full_name || 'Duty Medical Officer';
-    const error = await insertFirst([
-      {
-        table: 'hospital_opd_queue',
-        payload: {
-          hospital_id: hospitalInfo.id,
-          hospital_name: hospitalInfo.name,
-          token_number: tokenNum,
-          uhid: tokenNum,
-          patient_name: patientName,
-          phone: opdForm.phone.trim() || null,
-          department: opdForm.department,
-          doctor_name: doctorName,
-          status: 'WAITING',
-          source: 'hospital_walkin',
-          appointment_date: new Date().toISOString().slice(0, 10),
+
+    setIsSubmittingToken(true);
+    try {
+      const error = await insertFirst([
+        {
+          table: 'hospital_opd_queue',
+          payload: {
+            hospital_id: hospitalInfo.id,
+            hospital_name: hospitalInfo.name,
+            token_number: tokenNum,
+            uhid: tokenNum,
+            patient_name: patientName,
+            phone,
+            department: opdForm.department,
+            doctor_name: doctorName,
+            status: 'WAITING',
+            source: 'hospital_walkin',
+            appointment_date: new Date().toISOString().slice(0, 10),
+          },
         },
-      },
-      {
-        table: 'appointments',
-        payload: {
-          hospital_id: hospitalInfo.id,
-          token_number: tokenNum,
-          uhid: tokenNum,
-          patient_name: patientName,
-          phone: opdForm.phone.trim() || null,
-          department: opdForm.department,
-          doctor_name: doctorName,
-          status: 'WAITING',
-          appointment_date: new Date().toISOString().slice(0, 10),
+        {
+          table: 'appointments',
+          payload: {
+            hospital_id: hospitalInfo.id,
+            token_number: tokenNum,
+            uhid: tokenNum,
+            patient_name: patientName,
+            phone,
+            department: opdForm.department,
+            doctor_name: doctorName,
+            status: 'WAITING',
+            appointment_date: new Date().toISOString().slice(0, 10),
+          },
         },
-      },
-    ]);
-    if (error) {
-      toast.error(error);
-      return;
+      ]);
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      toast.success(`Walk-in token ${tokenNum} created`);
+      setOpdForm({ patientName: '', department: 'General Medicine', phone: '' });
+      closeModal();
+      void loadPlatformData(hospitalInfo.id);
+    } finally {
+      setIsSubmittingToken(false);
     }
-    toast.success(`Walk-in token ${tokenNum} created`);
-    setOpdForm({ patientName: '', department: 'General Medicine', phone: '' });
-    closeModal();
-    void loadPlatformData(hospitalInfo.id);
+  };
+
+  const handleAdvanceTriage = async (item: QueueRow) => {
+    if (!supabase || advancingTokenId) return;
+    const stage = triageStage(item.status);
+    if (stage === 'Completed') return;
+    const nextStatus: TriageStage = stage === 'In Consultation' ? 'Completed' : 'In Consultation';
+    setAdvancingTokenId(item.id);
+    try {
+      const tables = Array.from(new Set([item.source_table, 'hospital_opd_queue', 'appointments']));
+      let lastError = 'Unable to update triage status';
+      let updated = false;
+      for (const table of tables) {
+        const { error } = await supabase.from(table).update({ status: nextStatus }).eq('id', item.id);
+        if (!error) {
+          updated = true;
+          break;
+        }
+        lastError = error.message;
+      }
+      if (!updated) {
+        toast.error(lastError);
+        return;
+      }
+      toast.success(nextStatus === 'In Consultation' ? `Called ${item.token}` : `${item.token} marked complete`);
+      void loadPlatformData(hospitalInfo.id);
+    } finally {
+      setAdvancingTokenId(null);
+    }
   };
 
   const handleAddMedicine = async (event: React.FormEvent) => {
@@ -603,10 +843,46 @@ export default function HospitalMasterDashboard() {
   const totalCollections = invoices.reduce((sum, inv) => sum + inv.amount, 0);
   const outstanding = invoices.filter((inv) => !/paid|settled/i.test(inv.status)).reduce((sum, inv) => sum + inv.amount, 0);
 
+  const waitingCount = opdQueue.filter((q) => triageStage(q.status) === 'Waiting').length;
+  const inConsultCount = opdQueue.filter((q) => triageStage(q.status) === 'In Consultation').length;
+  const waitingMinutes = opdQueue
+    .filter((q) => triageStage(q.status) === 'Waiting')
+    .map((q) => waitMinutes(q.created_at))
+    .filter((mins): mins is number => mins != null);
+  const avgWaitLabel = waitingMinutes.length === 0
+    ? '—'
+    : `~${Math.round(waitingMinutes.reduce((sum, mins) => sum + mins, 0) / waitingMinutes.length)}m`;
+
+  const patientRegistry = useMemo(
+    () => buildPatientDirectory(opdQueue, masterPatients),
+    [opdQueue, masterPatients],
+  );
+
+  const filteredPatients = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return patientRegistry.filter((patient) => {
+      if (query) {
+        const haystack = `${patient.uhid} ${patient.patient_name} ${patient.phone}`.toLowerCase();
+        const digits = query.replace(/\D/g, '');
+        const phoneDigits = patient.phone.replace(/\D/g, '');
+        const matchesText = haystack.includes(query);
+        const matchesPhone = digits.length >= 3 && phoneDigits.includes(digits);
+        if (!matchesText && !matchesPhone) return false;
+      }
+      if (genderFilter !== 'all' && patient.gender.toLowerCase() !== genderFilter) {
+        return false;
+      }
+      if (ageFilter === 'pediatric' && (patient.age == null || patient.age >= 18)) return false;
+      if (ageFilter === 'adult' && (patient.age == null || patient.age < 18 || patient.age >= 60)) return false;
+      if (ageFilter === 'senior' && (patient.age == null || patient.age < 60)) return false;
+      return true;
+    });
+  }, [patientRegistry, searchQuery, genderFilter, ageFilter]);
+
   const navLinks: Array<{ id: NavModule; label: string; icon: typeof LayoutGrid; badge?: number }> = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutGrid },
-    { id: 'smartq', label: 'SmartQ OPD', icon: ListOrdered, badge: opdQueue.length },
-    { id: 'patients', label: 'Patients', icon: Users, badge: opdQueue.length },
+    { id: 'smartq', label: 'SmartQ OPD', icon: ListOrdered, badge: waitingCount + inConsultCount },
+    { id: 'patients', label: 'Patients', icon: Users, badge: patientRegistry.length },
     { id: 'ipd', label: 'IPD & Bed Census', icon: BedDouble, badge: beds.length },
     { id: 'pharmacy', label: 'Records & Pharmacy', icon: ClipboardCheck, badge: pharmacyItems.length },
     { id: 'emergency', label: 'Emergency Desk', icon: AlertTriangle, badge: emergencies.length },
@@ -818,43 +1094,225 @@ export default function HospitalMasterDashboard() {
             </div>
           )}
 
-          {(activeTab === 'smartq' || activeTab === 'patients') && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
-              <div className="flex items-center justify-between">
+          {activeTab === 'smartq' && (
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-black text-slate-900">Patient Registry &amp; SmartQ Queue</h3>
-                  <p className="text-xs text-slate-500">UHID records from Patient App bookings and walk-in OPD, scoped to {hospitalInfo.id}.</p>
+                  <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-cyan-50 border border-cyan-200 text-[10px] font-mono font-bold text-cyan-800 mb-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    ACTIVE TRIAGE ENGINE
+                  </div>
+                  <h3 className="text-lg font-black text-slate-900">SmartQ OPD Consultation Queue</h3>
+                  <p className="text-xs text-slate-500">Live token orchestration synchronized with Doctor Workspace examination rooms.</p>
                 </div>
-                <button type="button" onClick={() => setActiveModal('opd')} className="px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-bold flex items-center gap-1.5">
-                  <Plus className="w-3.5 h-3.5" /> Issue Token
+                <button
+                  type="button"
+                  onClick={() => setActiveModal('opd')}
+                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 shadow-xs transition cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Issue Walk-In Token</span>
                 </button>
               </div>
-              {opdQueue.length === 0 ? (
-                <EmptyState icon={Users} title="No Patient Records Found" body={`Waiting for live bookings scoped strictly to ${hospitalInfo.name} (${hospitalInfo.id}).`} actionLabel="Issue First Token" onAction={() => setActiveModal('opd')} />
-              ) : (
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase">
-                    <tr>
-                      <th className="py-3 px-4">UHID / Token</th>
-                      <th className="py-3 px-4">Patient</th>
-                      <th className="py-3 px-4">Department</th>
-                      <th className="py-3 px-4">Phone</th>
-                      <th className="py-3 px-4 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {opdQueue.map((p) => (
-                      <tr key={p.id}>
-                        <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">{p.token}</td>
-                        <td className="py-3.5 px-4 font-bold">{p.patient_name}</td>
-                        <td className="py-3.5 px-4">{p.department}</td>
-                        <td className="py-3.5 px-4 font-mono">{p.phone || '—'}</td>
-                        <td className="py-3.5 px-4 text-right">{p.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-mono font-bold uppercase text-slate-400">Waiting in Lobby</div>
+                    <div className="text-2xl font-black text-slate-900 mt-0.5">{waitingCount}</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-cyan-50 text-cyan-700">
+                    <ListOrdered className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-mono font-bold uppercase text-slate-400">In Consultation</div>
+                    <div className="text-2xl font-black text-blue-700 mt-0.5">{inConsultCount}</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-blue-50 text-blue-700">
+                    <Stethoscope className="w-5 h-5" />
+                  </div>
+                </div>
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] font-mono font-bold uppercase text-slate-400">Avg Wait Time</div>
+                    <div className="text-2xl font-black text-emerald-700 mt-0.5">{avgWaitLabel}</div>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-emerald-50 text-emerald-700">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                {opdQueue.length === 0 ? (
+                  <div className="p-12">
+                    <EmptyState
+                      icon={Clock}
+                      title="No Patients in SmartQ Queue"
+                      body={`Lobby is clear. Walk-in tokens and Patient App bookings scoped to ${hospitalInfo.name} appear in this triage stream instantly.`}
+                      actionLabel="Issue First Token"
+                      onAction={() => setActiveModal('opd')}
+                    />
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                        <tr>
+                          <th className="py-3 px-4">Token #</th>
+                          <th className="py-3 px-4">Patient Name</th>
+                          <th className="py-3 px-4">Department</th>
+                          <th className="py-3 px-4">Assigned Doctor</th>
+                          <th className="py-3 px-4">Wait Time</th>
+                          <th className="py-3 px-4">Triage Stage</th>
+                          <th className="py-3 px-4 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {opdQueue.map((item) => {
+                          const stage = triageStage(item.status);
+                          return (
+                            <tr key={`${item.source_table}-${item.id}`} className="hover:bg-cyan-50/40 transition">
+                              <td className="py-3.5 px-4 font-mono font-black text-cyan-800">{item.token}</td>
+                              <td className="py-3.5 px-4 font-bold text-slate-900">{item.patient_name}</td>
+                              <td className="py-3.5 px-4 text-slate-600">{item.department}</td>
+                              <td className="py-3.5 px-4 text-slate-600">{item.doctor_name || 'Unassigned'}</td>
+                              <td className="py-3.5 px-4 font-mono text-slate-500">{formatWait(item.created_at)}</td>
+                              <td className="py-3.5 px-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  stage === 'In Consultation'
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : stage === 'Completed'
+                                      ? 'bg-slate-100 text-slate-600 border border-slate-200'
+                                      : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}>
+                                  {stage}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-right">
+                                {stage === 'Completed' ? (
+                                  <span className="text-[11px] font-bold text-slate-400">Closed</span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleAdvanceTriage(item)}
+                                    disabled={advancingTokenId === item.id}
+                                    className="px-2.5 py-1 rounded-lg border border-slate-200 hover:border-cyan-600 bg-white text-[11px] font-bold text-slate-700 hover:text-cyan-800 transition cursor-pointer disabled:opacity-50"
+                                  >
+                                    {advancingTokenId === item.id ? 'Updating…' : stage === 'In Consultation' ? 'Mark Complete' : 'Call Next'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'patients' && (
+            <div className="space-y-6">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Master Patient Registry &amp; EMR Index</h3>
+                  <p className="text-xs text-slate-500">Demographic repository and encounter histories registered at {hospitalInfo.name}.</p>
+                </div>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Search by UHID, name, or phone..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-800 focus:outline-none focus:border-cyan-700"
+                    />
+                  </div>
+                  <select
+                    value={genderFilter}
+                    onChange={(e) => setGenderFilter(e.target.value)}
+                    className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                  >
+                    <option value="all">All Genders</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                  <select
+                    value={ageFilter}
+                    onChange={(e) => setAgeFilter(e.target.value)}
+                    className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold text-slate-700"
+                  >
+                    <option value="all">All Ages</option>
+                    <option value="pediatric">Pediatric (&lt;18)</option>
+                    <option value="adult">Adult (18–59)</option>
+                    <option value="senior">Senior (60+)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                {patientRegistry.length === 0 ? (
+                  <div className="p-12">
+                    <EmptyState
+                      icon={Users}
+                      title="No Patient Records Synchronized"
+                      body={`Zero mock entries. Verified profiles from the Patient App and walk-in OPD registrations scoped to ${hospitalInfo.name} (${hospitalInfo.id}) populate here.`}
+                      actionLabel="Issue Walk-In Token"
+                      onAction={() => setActiveModal('opd')}
+                    />
+                  </div>
+                ) : filteredPatients.length === 0 ? (
+                  <div className="p-12 text-center text-slate-400 space-y-2">
+                    <Search className="w-8 h-8 mx-auto text-slate-300" />
+                    <div className="text-sm font-bold text-slate-700">No matching patient charts</div>
+                    <p className="text-xs text-slate-400">Adjust search or gender/age filters to widen the directory.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                        <tr>
+                          <th className="py-3 px-4">Permanent UHID</th>
+                          <th className="py-3 px-4">Full Name</th>
+                          <th className="py-3 px-4">Contact Number</th>
+                          <th className="py-3 px-4">Total Visits</th>
+                          <th className="py-3 px-4">Last Encounter</th>
+                          <th className="py-3 px-4 text-right">Clinical Record Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredPatients.map((patient) => (
+                          <tr key={patient.id} className="hover:bg-slate-50/70 transition">
+                            <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">{patient.uhid}</td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-bold text-slate-900">{patient.patient_name}</div>
+                              <div className="text-[10px] text-slate-400">
+                                {patient.gender || 'Sex n/a'}
+                                {patient.age != null ? ` · ${patient.age}y` : ''}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-slate-600">{patient.phone || 'Not Provided'}</td>
+                            <td className="py-3.5 px-4 font-mono font-bold text-slate-800">{patient.visits}</td>
+                            <td className="py-3.5 px-4 font-mono text-slate-500">{formatEncounter(patient.last_encounter)}</td>
+                            <td className="py-3.5 px-4 text-right">
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                {patient.record_status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1101,12 +1559,140 @@ export default function HospitalMasterDashboard() {
         </div>
       </main>
 
-      {activeModal && (
+      {activeModal === 'opd' && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600">
+                  <TicketPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-slate-900 tracking-tight">Issue Walk-In OPD Token</h3>
+                    <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                      LIVE
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Instant outpatient queue token &bull; Scoped to{' '}
+                    <span className="font-semibold text-slate-700">{hospitalInfo.id}</span>
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="p-1 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleIssueToken} className="space-y-4 text-xs">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                  <span>Patient Full Name</span>
+                  <span className="text-emerald-600 font-normal normal-case text-[10px]">* Required</span>
+                </label>
+                <div className="relative">
+                  <Users className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Ramesh Gowda"
+                    value={opdForm.patientName}
+                    onChange={(e) => setOpdForm((p) => ({ ...p, patientName: e.target.value }))}
+                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+                  Clinical Department
+                </label>
+                <div className="relative">
+                  <Stethoscope className="w-4 h-4 text-slate-400 absolute left-3.5 top-3 pointer-events-none" />
+                  <select
+                    value={opdForm.department}
+                    onChange={(e) => setOpdForm((p) => ({ ...p, department: e.target.value }))}
+                    className="w-full pl-10 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition appearance-none cursor-pointer"
+                  >
+                    {OPD_DEPARTMENTS.map((dept) => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="absolute right-3.5 top-3.5 pointer-events-none text-slate-400">
+                    <ChevronRight className="w-3.5 h-3.5 rotate-90" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                  <span>Contact Mobile</span>
+                  <span className="text-slate-400 font-normal normal-case text-[10px]">SMS Updates</span>
+                </label>
+                <div className="relative flex items-center">
+                  <div className="absolute left-3.5 flex items-center gap-1 text-slate-500 font-mono font-bold text-xs pointer-events-none">
+                    <Phone className="w-3.5 h-3.5 text-slate-400" />
+                    <span>+91</span>
+                  </div>
+                  <input
+                    type="tel"
+                    inputMode="numeric"
+                    maxLength={10}
+                    placeholder="98450 12345"
+                    value={opdForm.phone}
+                    onChange={(e) => setOpdForm((p) => ({ ...p, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                    className="w-full pl-[4.75rem] pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 transition"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500 font-medium">Auto-Allocated Queue Slot:</span>
+                <span className="font-mono font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                  {opdTokenPreview}
+                </span>
+              </div>
+
+              <div className="pt-2 grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="w-full py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingToken || !opdForm.patientName.trim()}
+                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-black text-xs uppercase tracking-wider shadow-md shadow-emerald-600/20 active:scale-[0.99] transition cursor-pointer flex items-center justify-center gap-2 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+                >
+                  {isSubmittingToken ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Issuing...</span>
+                    </>
+                  ) : (
+                    <span>Create Token</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {activeModal && activeModal !== 'opd' && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-sm font-bold text-slate-900">
-                {activeModal === 'opd' && 'Issue Walk-In OPD Token'}
                 {activeModal === 'pharmacy' && 'Add Medicine to Formulary'}
                 {activeModal === 'bed' && 'Register Ward Bed'}
                 {activeModal === 'invoice' && 'Post Cashier Invoice'}
@@ -1116,15 +1702,6 @@ export default function HospitalMasterDashboard() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-
-            {activeModal === 'opd' && (
-              <form onSubmit={handleIssueToken} className="space-y-3 text-xs">
-                <input required value={opdForm.patientName} onChange={(e) => setOpdForm((p) => ({ ...p, patientName: e.target.value }))} placeholder="Patient full name" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
-                <input value={opdForm.department} onChange={(e) => setOpdForm((p) => ({ ...p, department: e.target.value }))} placeholder="Department" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
-                <input value={opdForm.phone} onChange={(e) => setOpdForm((p) => ({ ...p, phone: e.target.value }))} placeholder="Phone (optional)" className="w-full px-3 py-2.5 border border-slate-200 rounded-xl" />
-                <button type="submit" className="w-full py-2.5 rounded-xl bg-emerald-600 text-white font-bold uppercase">Create Token</button>
-              </form>
-            )}
 
             {activeModal === 'pharmacy' && (
               <form onSubmit={handleAddMedicine} className="space-y-3 text-xs">
