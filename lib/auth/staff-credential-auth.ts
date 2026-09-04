@@ -64,7 +64,21 @@ function matchesScope(user: StaffCredentialRecord, scope: PortalAuthScope): bool
   if (scope === 'hospital_admin') {
     return user.staff_type === 'Admin' && !isSuperAdminCredential(user);
   }
-  return ['Nurse', 'Receptionist', 'Pharmacist'].includes(user.staff_type);
+  return ['Nurse', 'Receptionist', 'Pharmacist', 'Doctor', 'Staff'].includes(user.staff_type);
+}
+
+function hospitalNodeIdsMatch(left?: string, right?: string): boolean {
+  if (!left || !right) return false;
+  const aliases: Record<string, string> = {
+    'RH-BLR-01': 'HOSP-01',
+    'HOSP-01': 'HOSP-01',
+  };
+  const normalize = (value: string) => aliases[value.trim()] ?? value.trim();
+  return normalize(left) === normalize(right);
+}
+
+function isInactiveStaffStatus(status?: string): boolean {
+  return ['Restricted', 'Suspended', 'Inactive'].includes(String(status ?? ''));
 }
 
 async function lookupStaffByEmail(email: string): Promise<StaffCredentialRecord | null> {
@@ -164,21 +178,21 @@ export async function authenticatePortalCredential(params: {
     if (params.scope === 'hospital_admin') {
       return { ok: false, error: 'This account is not a Hospital Admin credential. Use the Staff portal.' };
     }
-    if (user.staff_type === 'Doctor') {
-      return { ok: false, error: 'Clinician accounts must sign in through the Doctor Portal.' };
+    if (user.staff_type === 'Admin') {
+      return {
+        ok: false,
+        error: 'Hospital Admin accounts must sign in through the Hospital Admin portal.',
+      };
     }
-    return {
-      ok: false,
-      error: 'Hospital Admin accounts must sign in through the Hospital Admin portal.',
-    };
+    return { ok: false, error: 'This credential is not authorized for the Staff & Doctor portal.' };
   }
 
-  if (params.hospitalId && user.hospital_id !== params.hospitalId) {
+  if (params.hospitalId && !hospitalNodeIdsMatch(user.hospital_id, params.hospitalId)) {
     return { ok: false, error: 'This account is not registered under the selected hospital tenant.' };
   }
 
-  if (user.status === 'Restricted') {
-    return { ok: false, error: 'This account has been restricted. Contact your hospital administrator.' };
+  if (isInactiveStaffStatus(user.status)) {
+    return { ok: false, error: 'Your account is inactive. Contact platform administration.' };
   }
 
   if (user.temporary_passcode !== cleanPasscode) {

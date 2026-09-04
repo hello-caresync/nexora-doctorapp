@@ -3,38 +3,32 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  AlertCircle,
   ArrowRight,
   Building2,
   Eye,
   EyeOff,
-  HeartPulse,
+  HeartHandshake,
+  KeyRound,
   Loader2,
   Lock,
   Mail,
   ShieldCheck,
   Stethoscope,
-  Users2,
 } from 'lucide-react';
-import { createClient } from '@supabase/supabase-js';
 import { toast } from 'sonner';
 import { recordRealStaffLogin, type AuthenticatedUserPayload } from '@/lib/recordStaffLogin';
 import {
   getStaffPortalSession,
   persistStaffPortalSession,
+  resolveStaffDepartmentRoute,
   type StaffPortalSession,
 } from '@/lib/auth/ecosystem-sessions';
-import {
-  clearStaleAuthArtifacts,
-} from '@/lib/auth/active-session';
+import { clearStaleAuthArtifacts } from '@/lib/auth/active-session';
 import {
   authenticatePortalCredential,
   loadHospitalOptionsForLogin,
 } from '@/lib/auth/staff-credential-auth';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+import { getDoctorSession, saveDoctorSession } from '@/lib/doctor/session';
 
 type HospitalOption = {
   id: string;
@@ -42,7 +36,7 @@ type HospitalOption = {
   location: string;
 };
 
-function HospitalStaffLoginForm() {
+function StaffDoctorLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get('redirect');
@@ -51,59 +45,46 @@ function HospitalStaffLoginForm() {
   const [selectedHospitalId, setSelectedHospitalId] = useState('HOSP-01');
   const [email, setEmail] = useState('');
   const [passcode, setPasscode] = useState('');
-  const [showPasscode, setShowPasscode] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     clearStaleAuthArtifacts();
 
+    const doctorSession = getDoctorSession();
+    if (doctorSession?.doctorId) {
+      router.replace('/doctor/workspace');
+      return;
+    }
+
     const activeSession = getStaffPortalSession();
     if (activeSession && activeSession.staff_type !== 'Admin') {
+      const destination = resolveStaffDepartmentRoute(activeSession.staff_type);
       const safeRedirect =
         redirectUrl &&
         redirectUrl !== '/staff/login' &&
         !redirectUrl.startsWith('/staff/login')
           ? redirectUrl
-          : null;
-      router.replace(safeRedirect || '/dashboard');
+          : destination;
+      router.replace(safeRedirect);
       return;
     }
 
     void loadHospitalOptionsForLogin().then((options) => {
       setHospitals(options);
       setSelectedHospitalId((prev) =>
-        options.some((o) => o.id === prev) ? prev : options[0]?.id ?? 'HOSP-01',
+        options.some((option) => option.id === prev) ? prev : options[0]?.id ?? 'HOSP-01',
       );
       setIsReady(true);
     });
-
-    if (!supabase) return;
-
-    const channel = supabase
-      .channel('staff_login_hospital_feed')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospital_tenants' }, () => {
-        void loadHospitalOptionsForLogin().then(setHospitals);
-      })
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'hospital_staff_credentials' },
-        () => {
-          void loadHospitalOptionsForLogin().then(setHospitals);
-        },
-      )
-      .subscribe();
-
-    return () => {
-      void supabase.removeChannel(channel);
-    };
   }, [router, redirectUrl]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setErrorMessage(null);
-    setIsSubmitting(true);
+    setLoading(true);
 
     try {
       const result = await authenticatePortalCredential({
@@ -131,8 +112,6 @@ function HospitalStaffLoginForm() {
         return;
       }
 
-      const portalAccess = '/dashboard';
-
       void recordRealStaffLogin({
         id: user.id,
         hospital_id: user.hospital_id,
@@ -143,8 +122,26 @@ function HospitalStaffLoginForm() {
         email: user.email,
         temporary_passcode: passcode.trim(),
         phone: user.phone,
-        portal_access: portalAccess,
+        portal_access: user.staff_type === 'Doctor' ? '/doctor/workspace' : '/dashboard',
       });
+
+      toast.success(`Welcome, ${user.full_name} (${user.staff_type})`);
+
+      if (user.staff_type === 'Doctor') {
+        saveDoctorSession({
+          doctorId: user.id,
+          doctorName: user.full_name,
+          employeeId: user.id,
+          fullName: user.full_name,
+          department: user.department,
+          specialization: user.department,
+          email: user.email,
+          hospitalCode: user.hospital_id,
+          portalRoute: '/doctor/workspace',
+        });
+        router.push('/doctor/workspace');
+        return;
+      }
 
       const session: StaffPortalSession = {
         id: user.id,
@@ -154,210 +151,195 @@ function HospitalStaffLoginForm() {
         staff_type: user.staff_type,
         department: user.department,
         email: user.email,
-        portal_access: portalAccess,
+        portal_access: '/dashboard',
       };
 
       persistStaffPortalSession(session);
+      document.cookie = `curasync_session_role=${encodeURIComponent(user.staff_type)}; path=/; max-age=86400; SameSite=Lax`;
 
-      toast.success(`Authenticated as ${user.full_name} (${user.staff_type})`);
-      router.push(redirectUrl && redirectUrl.startsWith('/dashboard') ? redirectUrl : '/dashboard');
+      const destination =
+        redirectUrl && redirectUrl.startsWith('/dashboard') ? redirectUrl : '/dashboard';
+      router.push(destination);
     } catch (err: unknown) {
-      setErrorMessage(
-        err instanceof Error ? err.message : 'Authentication failed. Please verify your credentials.',
-      );
+      setErrorMessage(err instanceof Error ? err.message : 'Authentication error.');
     } finally {
-      setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
-  const selectedHospital = hospitals.find((h) => h.id === selectedHospitalId);
+  const selectedHospital = hospitals.find((hospital) => hospital.id === selectedHospitalId);
 
   if (!isReady) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-100">
-        <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+      <div className="min-h-screen w-full bg-[#0a2e47] flex items-center justify-center">
+        <Loader2 className="w-6 h-6 animate-spin text-cyan-300" />
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 p-4 font-sans sm:p-6 lg:p-10">
-      <div className="grid min-h-[600px] w-full max-w-5xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl lg:grid-cols-12">
-        <div className="relative flex flex-col justify-between overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-8 text-white sm:p-10 lg:col-span-5">
-          <div className="relative z-10 space-y-6">
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 font-mono text-xs font-semibold text-indigo-200">
-              <HeartPulse className="h-4 w-4 animate-pulse text-rose-400" />
-              <span>OPERATIONAL STAFF GATEWAY</span>
-            </div>
+    <div className="min-h-screen w-full bg-[#0a2e47] text-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans relative overflow-hidden select-none">
+      <div className="absolute inset-0 bg-[radial-gradient(#144970_1.2px,transparent_1.2px)] [background-size:24px_24px] opacity-60 pointer-events-none" />
+      <div className="absolute -top-32 -left-32 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-32 -right-32 w-96 h-96 bg-blue-600/15 rounded-full blur-3xl pointer-events-none" />
 
-            <div className="space-y-2">
-              <h2 className="text-2xl font-black tracking-tight sm:text-3xl">
-                Hospital Staff Authentication
-              </h2>
-              <p className="text-xs leading-relaxed text-slate-300">
-                Sign in with admin-provisioned credentials for nursing, pharmacy, reception, and
-                clinical support roles.
-              </p>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
-                <ShieldCheck className="h-5 w-5 shrink-0 text-indigo-400" />
-                <div className="text-xs">
-                  <div className="font-bold text-white">Provisioned Credentials Only</div>
-                  <div className="text-[11px] text-slate-400">
-                    Verified against live staff records in Supabase
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
-                <Users2 className="h-5 w-5 shrink-0 text-cyan-400" />
-                <div className="text-xs">
-                  <div className="font-bold text-white">Hospital App Routing</div>
-                  <div className="text-[11px] text-slate-400">
-                    Nurses, reception, and pharmacy enter the shared Hospital App dashboard
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/5 p-3">
-                <Stethoscope className="h-5 w-5 shrink-0 text-teal-400" />
-                <div className="text-xs">
-                  <div className="font-bold text-white">Doctors Use Clinician Portal</div>
-                  <div className="text-[11px] text-slate-400">
-                    Clinicians should sign in via the Doctor Portal card on the home screen
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="relative z-10 border-t border-white/10 pt-6 text-[11px] text-slate-400">
-            Regal Health Network • Staff Access Layer
-          </div>
-        </div>
-
-        <div className="flex flex-col justify-center bg-white p-8 sm:p-12 lg:col-span-7">
-          <div className="mx-auto w-full max-w-md space-y-6">
-            <div>
-              <h3 className="text-xl font-black tracking-tight text-slate-900 sm:text-2xl">
-                Sign In to Your Workspace
-              </h3>
-              <p className="mt-1 text-xs text-slate-500">
-                Select your hospital node and enter your provisioned staff credentials.
-              </p>
-            </div>
-
-            {errorMessage && (
-              <div className="flex items-center gap-2.5 rounded-xl border border-rose-200 bg-rose-50 p-3.5 text-xs font-semibold text-rose-800">
-                <AlertCircle className="h-4 w-4 shrink-0 text-rose-600" />
-                <span>{errorMessage}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold tracking-wider text-slate-700 uppercase">
-                  Select Hospital Facility
-                </label>
-                <div className="relative">
-                  <Building2 className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <select
-                    value={selectedHospitalId}
-                    onChange={(e) => setSelectedHospitalId(e.target.value)}
-                    className="w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-4 pl-10 text-xs font-medium text-slate-900 transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
-                  >
-                    {hospitals.map((hosp) => (
-                      <option key={hosp.id} value={hosp.id}>
-                        {hosp.name} ({hosp.location})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold tracking-wider text-slate-700 uppercase">
-                  Official Email Address
-                </label>
-                <div className="relative">
-                  <Mail className="absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. nurse@regalhospital.com"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-3.5 pl-10 text-xs font-medium text-slate-900 transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold tracking-wider text-slate-700 uppercase">
-                  Security Passcode
-                </label>
-                <div className="relative">
-                  <Lock className="absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type={showPasscode ? 'text' : 'password'}
-                    required
-                    value={passcode}
-                    onChange={(e) => setPasscode(e.target.value)}
-                    placeholder="Enter your security passcode"
-                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pr-10 pl-10 font-mono text-xs font-medium text-slate-900 transition focus:border-indigo-600 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPasscode(!showPasscode)}
-                    className="absolute top-1/2 right-3.5 -translate-y-1/2 cursor-pointer text-slate-400 transition hover:text-slate-700"
-                  >
-                    {showPasscode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="mt-2 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-xs font-bold tracking-wider text-white uppercase shadow-md shadow-indigo-600/20 transition hover:bg-indigo-700 active:scale-[0.99] disabled:opacity-50"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>Verifying Credentials...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Authenticate & Enter Workspace</span>
-                    <ArrowRight className="h-4 w-4" />
-                  </>
-                )}
-              </button>
-            </form>
-
-            <div className="flex items-center justify-between border-t border-slate-100 pt-4 text-[11px] text-slate-400">
-              <span>Active Node: {selectedHospital?.name ?? selectedHospitalId}</span>
-              <button type="button" onClick={() => router.push('/')} className="font-semibold text-indigo-600">
-                Portal Home
-              </button>
-            </div>
-          </div>
+      <div className="max-w-md mx-auto w-full flex items-center justify-between z-10 pt-2">
+        <button
+          type="button"
+          onClick={() => router.push('/')}
+          className="text-xs font-semibold text-cyan-300/80 hover:text-cyan-200 transition-colors"
+        >
+          &larr; Workspace Directory
+        </button>
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#07253a] border border-[#144970] text-[10px] font-mono font-bold text-cyan-300">
+          <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+          <span>HOSPITAL OS ACCESS</span>
         </div>
       </div>
+
+      <div className="max-w-md w-full mx-auto my-auto p-8 rounded-3xl bg-white text-slate-800 shadow-2xl border border-slate-200 relative z-10 space-y-6">
+        <div className="text-center space-y-2">
+          <div className="inline-flex p-3 rounded-2xl bg-cyan-50 border border-cyan-200 text-cyan-700 mb-1">
+            <Building2 className="w-7 h-7" />
+          </div>
+          <div>
+            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-cyan-700 block">
+              Facility Credential Node
+            </span>
+            <h1 className="text-2xl font-black tracking-tight text-slate-900 mt-0.5">
+              Staff &amp; Doctor Portal
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Authorized clinical personnel &amp; administrative staff access
+            </p>
+          </div>
+          <div className="flex items-center justify-center gap-2 pt-1">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-50 border border-slate-200 text-[10px] font-bold text-slate-600">
+              <HeartHandshake className="w-3 h-3 text-cyan-700" />
+              Staff
+            </span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[10px] font-bold text-emerald-800">
+              <Stethoscope className="w-3 h-3" />
+              Doctor
+            </span>
+          </div>
+        </div>
+
+        {errorMessage && (
+          <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs font-semibold text-rose-700 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-600 shrink-0" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700 block">
+              Hospital Node
+            </label>
+            <div className="relative">
+              <Building2 className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5 pointer-events-none" />
+              <select
+                value={selectedHospitalId}
+                onChange={(e) => setSelectedHospitalId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:border-cyan-600 focus:bg-white appearance-none cursor-pointer"
+              >
+                {hospitals.length === 0 ? (
+                  <option value="HOSP-01">HOSP-01 · Default node</option>
+                ) : (
+                  hospitals.map((hospital) => (
+                    <option key={hospital.id} value={hospital.id}>
+                      {hospital.name} ({hospital.id})
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700 block">
+              Hospital Login Email
+            </label>
+            <div className="relative">
+              <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="doctor@regalhospital.com"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-medium text-slate-900 focus:outline-none focus:border-cyan-600 focus:bg-white transition-all shadow-xs"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-700 block">
+              Assigned Passcode Key
+            </label>
+            <div className="relative">
+              <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                required
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                placeholder="e.g. REGAL#2026@AS13"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-10 py-2.5 text-sm font-mono font-bold text-slate-900 focus:outline-none focus:border-cyan-600 focus:bg-white transition-all shadow-xs"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3.5 top-3 text-slate-400 hover:text-slate-600 transition"
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full py-3.5 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white font-bold text-xs uppercase tracking-wider transition duration-150 flex items-center justify-center gap-2 shadow-md shadow-cyan-900/20 active:scale-[0.99] cursor-pointer disabled:opacity-50"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Authenticating Clearance...</span>
+              </>
+            ) : (
+              <>
+                <span>Log In to Workspace</span>
+                <ArrowRight className="w-4 h-4" />
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="pt-3 border-t border-slate-100 text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
+          <Lock className="w-3.5 h-3.5 text-slate-400" />
+          <span>Role-Scoped Access Control Active · {selectedHospital?.id ?? selectedHospitalId}</span>
+        </div>
+      </div>
+
+      <footer className="max-w-md mx-auto w-full text-center text-[11px] text-cyan-300/70 py-2 z-10 font-mono">
+        Regal Healthcare Platform &bull; Node {selectedHospital?.id ?? selectedHospitalId}
+      </footer>
     </div>
   );
 }
 
-export default function HospitalStaffLoginPage() {
+export default function StaffDoctorLoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-100">
-          <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
+        <div className="min-h-screen w-full bg-[#0a2e47] flex items-center justify-center">
+          <Loader2 className="w-6 h-6 animate-spin text-cyan-300" />
         </div>
       }
     >
-      <HospitalStaffLoginForm />
+      <StaffDoctorLoginForm />
     </Suspense>
   );
 }

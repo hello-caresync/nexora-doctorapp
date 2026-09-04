@@ -119,6 +119,7 @@ export function getVendorSession(): VendorSession | null {
 export function resolveStaffDepartmentRoute(staffType: string): string {
   const role = staffType.trim();
   if (role === 'Admin') return '/admin/login';
-  if (['Nurse', 'Pharmacist', 'Receptionist'].includes(role)) return '/dashboard';
+  if (role === 'Doctor') return '/doctor/workspace';
+  if (['Nurse', 'Pharmacist', 'Receptionist', 'Staff'].includes(role)) return '/dashboard';
   return '/staff/login';
 }

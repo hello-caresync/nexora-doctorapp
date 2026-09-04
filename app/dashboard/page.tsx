@@ -838,6 +838,7 @@ export default function HospitalMasterDashboard() {
   };
 
   const doctorCount = staffMembers.filter((s) => s.staff_type === 'Doctor').length;
+  const canProvisionStaff = currentUserRole === 'Admin';
   const occupiedBeds = beds.filter((b) => /occup/i.test(b.status)).length;
   const occupancyRate = beds.length > 0 ? Math.round((occupiedBeds / beds.length) * 100) : 0;
   const totalCollections = invoices.reduce((sum, inv) => sum + inv.amount, 0);
@@ -983,10 +984,12 @@ export default function HospitalMasterDashboard() {
               <Plus className="w-4 h-4" />
               Issue OPD Token
             </button>
-            <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2">
-              <Plus className="w-4 h-4" />
-              Provision Staff
-            </button>
+            {canProvisionStaff && (
+              <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                Provision Staff
+              </button>
+            )}
             <button type="button" onClick={() => void loadPlatformData(hospitalInfo.id)} className="p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50">
               <RefreshCw className={`w-4 h-4 text-cyan-600 ${isLoading ? 'animate-spin' : ''}`} />
             </button>
@@ -1484,10 +1487,12 @@ export default function HospitalMasterDashboard() {
                   <h3 className="text-lg font-black text-slate-900">Hospital Staff Directory</h3>
                   <p className="text-xs text-slate-500">Active roster for {hospitalInfo.name}.</p>
                 </div>
-                <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-2">
-                  <Plus className="w-4 h-4" />
-                  Add Staff Credential
-                </button>
+                {canProvisionStaff && (
+                  <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-2">
+                    <Plus className="w-4 h-4" />
+                    Add Staff Credential
+                  </button>
+                )}
               </div>
               {currentUserRole !== 'Admin' ? (
                 <div className="p-10 bg-white rounded-2xl border border-slate-200 text-center space-y-3">
@@ -1496,7 +1501,7 @@ export default function HospitalMasterDashboard() {
                   </div>
                   <h4 className="text-sm font-bold">Credential Keyring Restricted</h4>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    Logged in as {currentUserRole}. You may provision new staff, but existing passcodes are visible only to Hospital Administrators.
+                    Logged in as {currentUserRole}. Staff provisioning and passcode keys are available only to Hospital Administrators.
                   </p>
                 </div>
               ) : staffMembers.length === 0 ? (

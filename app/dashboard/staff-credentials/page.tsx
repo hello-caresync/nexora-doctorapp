@@ -124,6 +124,11 @@ function StaffCredentialsContent() {
         staff_type?: string;
         role?: string;
       };
+      const role = session.staff_type || session.role;
+      if (role !== 'Admin') {
+        router.replace('/dashboard');
+        return;
+      }
       const hospitalId = hospitalIdParam || session.hospital_id || session.hospitalId;
       if (hospitalId) {
         setCurrentHospital({
