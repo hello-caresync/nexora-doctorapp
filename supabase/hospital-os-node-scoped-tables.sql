@@ -64,6 +64,20 @@ CREATE TABLE IF NOT EXISTS public.hospital_supply_orders (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS public.hospital_patients (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  hospital_id TEXT NOT NULL,
+  uhid TEXT,
+  full_name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  gender TEXT,
+  age INTEGER,
+  passcode TEXT,
+  status TEXT NOT NULL DEFAULT 'Active',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS public.hospital_emergencies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   hospital_id TEXT NOT NULL,
@@ -86,6 +100,9 @@ CREATE INDEX IF NOT EXISTS idx_hospital_beds_hospital ON public.hospital_beds (h
 CREATE INDEX IF NOT EXISTS idx_hospital_invoices_hospital ON public.hospital_invoices (hospital_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_hospital_supply_orders_hospital ON public.hospital_supply_orders (hospital_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_hospital_emergencies_hospital ON public.hospital_emergencies (hospital_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hospital_patients_hospital ON public.hospital_patients (hospital_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hospital_patients_email ON public.hospital_patients (hospital_id, email);
+CREATE INDEX IF NOT EXISTS idx_hospital_patients_phone ON public.hospital_patients (hospital_id, phone);
 
 ALTER TABLE public.hospital_opd_queue ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hospital_pharmacy_inventory ENABLE ROW LEVEL SECURITY;
@@ -93,6 +110,7 @@ ALTER TABLE public.hospital_beds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hospital_invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hospital_supply_orders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.hospital_emergencies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.hospital_patients ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS hospital_opd_queue_anon ON public.hospital_opd_queue;
 CREATE POLICY hospital_opd_queue_anon ON public.hospital_opd_queue FOR ALL USING (true) WITH CHECK (true);
@@ -112,6 +130,9 @@ CREATE POLICY hospital_supply_orders_anon ON public.hospital_supply_orders FOR A
 DROP POLICY IF EXISTS hospital_emergencies_anon ON public.hospital_emergencies;
 CREATE POLICY hospital_emergencies_anon ON public.hospital_emergencies FOR ALL USING (true) WITH CHECK (true);
 
+DROP POLICY IF EXISTS hospital_patients_anon ON public.hospital_patients;
+CREATE POLICY hospital_patients_anon ON public.hospital_patients FOR ALL USING (true) WITH CHECK (true);
+
 DO $$
 DECLARE
   t text;
@@ -123,6 +144,7 @@ BEGIN
     'hospital_supply_orders',
     'hospital_beds',
     'hospital_emergencies',
+    'hospital_patients',
     'appointments',
     'hospital_staff_credentials'
   ])
