@@ -7,7 +7,6 @@ import {
   AlertTriangle,
   BedDouble,
   Bell,
-  Building2,
   CheckCircle2,
   ChevronRight,
   ClipboardCheck,
@@ -2057,8 +2056,12 @@ export default function HospitalMasterDashboard() {
             <button type="button" className="md:hidden p-2 rounded-xl border border-slate-200" onClick={() => setMobileNavOpen(true)} aria-label="Open modules">
               <Menu className="w-4 h-4" />
             </button>
-            <div className="p-2.5 rounded-xl bg-cyan-50 border border-cyan-200 text-[#0c314b]">
-              <Building2 className="w-5 h-5" />
+            <div className="w-10 h-10 shrink-0 aspect-square flex items-center justify-center">
+              <img
+                src="/regal-logo-transparent.png"
+                alt="Regal Hospital"
+                className="w-full h-full object-contain"
+              />
             </div>
             <div>
               <h2 className="text-base font-black text-slate-900 leading-tight">
