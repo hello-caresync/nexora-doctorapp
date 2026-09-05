@@ -8,6 +8,13 @@ import {
   calculateNextOpdTokenNumber,
 } from '@/lib/hospital/operations/appointment-sync';
 import {
+  HOSPITAL_TENANT_ID,
+  REGAL_FACILITY_CODE,
+  REGAL_HOSPITAL_ID,
+} from '@/lib/regal/constants';
+import { isUuidColumnError, isUuidValue } from '@/lib/hospital/hospital-node';
+import { readPatientPortalSession, mintPatientUhid } from '@/lib/patient/portal-session';
+import {
   getActivePatientId,
   getActivePatientName,
   persistActivePatientNode,
@@ -86,7 +93,7 @@ const ALL_41_DOCTORS: DoctorDirectoryItem[] = [
 
 const REGAL_HOSPITAL = 'Regal Hospital';
 const PATIENT_BOOKING_SOURCE = 'patient_app';
-const PATIENT_BOOKING_STATUS = 'SCHEDULED';
+const PATIENT_BOOKING_STATUS = 'WAITING';
 
 function isValidUUID(value: unknown): value is string {
   return (
@@ -153,18 +160,6 @@ async function calculateNextTokenNumber(
   }
 }
 
-function isSchemaCacheError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes('schema cache') ||
-    lower.includes('could not find') ||
-    lower.includes('does not exist') ||
-    lower.includes('pgrst') ||
-    lower.includes('invalid input syntax for type uuid')
-  );
-}
-
-/** Supabase token_label column — e.g. "Token #3". */
 function formatBookingTokenLabel(tokenNumber: number): string {
   const seq = Number.isFinite(tokenNumber) && tokenNumber > 0 ? tokenNumber : 1;
   return `Token #${seq}`;
@@ -173,6 +168,10 @@ function formatBookingTokenLabel(tokenNumber: number): string {
 interface FullyAliasedBookingInput {
   patientId: string;
   patientName: string;
+  uhid: string;
+  phone: string;
+  hospitalId: string;
+  hospitalName: string;
   doctorName: string;
   doctorCode: string;
   department: string;
@@ -190,21 +189,28 @@ function buildFullyAliasedBookingPayload(input: FullyAliasedBookingInput): Recor
   const patientName = input.patientName.trim();
   const doctorCode = String(input.doctorCode || '').trim().toUpperCase();
   const doctorName = input.doctorName.trim();
+  const department = input.department.trim();
   const clinicalReason = input.reason.trim();
   const slotTime = input.slotTime;
   const feeDisplay = input.consultationFee;
   const seq = Number.isFinite(input.tokenNumber) && input.tokenNumber > 0 ? input.tokenNumber : 1;
+  const hospitalId = input.hospitalId.trim() || HOSPITAL_TENANT_ID;
 
-  return {
-    patient_id: input.patientId,
+  const payload: Record<string, unknown> = {
     name: patientName,
     patient_name: patientName,
+    uhid: input.uhid,
+    phone: input.phone,
+    patient_phone: input.phone,
     doctor_name: doctorName,
     doctor_code: doctorCode,
     doctor_id: doctorCode,
     doctor_employee_id: doctorCode,
-    department: input.department,
-    hospital_name: REGAL_HOSPITAL,
+    department,
+    hospital_id: hospitalId,
+    hospital_code: hospitalId,
+    facility_code: REGAL_FACILITY_CODE,
+    hospital_name: input.hospitalName || REGAL_HOSPITAL,
     appointment_date: input.appointmentDate,
     slot_time: slotTime,
     appointment_time: slotTime,
@@ -224,38 +230,20 @@ function buildFullyAliasedBookingPayload(input: FullyAliasedBookingInput): Recor
     created_at: input.nowIso,
     updated_at: input.nowIso,
   };
+
+  if (isUuidValue(input.patientId)) {
+    payload.patient_id = input.patientId;
+  }
+
+  return payload;
 }
 
 /** Token column aliases — token_number, queue_number, token_label. */
-function buildPatientAppointmentPayload(input: {
-  patientId: string;
-  patientName: string;
-  doctorName: string;
-  doctorCode: string;
-  department: string;
-  appointmentDate: string;
-  slotTime: string;
-  consultationFee: string;
-  reason: string;
-  tokenNumber: number;
-  nowIso: string;
-}): Record<string, unknown> {
+function buildPatientAppointmentPayload(input: FullyAliasedBookingInput): Record<string, unknown> {
   return buildFullyAliasedBookingPayload(input);
 }
 
-function buildAppointmentsLedgerPayload(input: {
-  patientId: string;
-  patientName: string;
-  doctorName: string;
-  doctorCode: string;
-  department: string;
-  appointmentDate: string;
-  slotTime: string;
-  consultationFee: string;
-  reason: string;
-  tokenNumber: number;
-  nowIso: string;
-}): Record<string, unknown> {
+function buildAppointmentsLedgerPayload(input: FullyAliasedBookingInput): Record<string, unknown> {
   const feeDisplay = input.consultationFee;
   const feeNumeric = Number(String(feeDisplay).replace(/[^\d.]/g, '')) || 0;
 
@@ -263,6 +251,82 @@ function buildAppointmentsLedgerPayload(input: {
     ...buildFullyAliasedBookingPayload(input),
     consultation_fee: feeNumeric,
   };
+}
+
+function buildOpdQueuePayload(input: FullyAliasedBookingInput): Record<string, unknown> {
+  return {
+    hospital_id: input.hospitalId,
+    hospital_name: input.hospitalName || REGAL_HOSPITAL,
+    token_number: formatBookingTokenLabel(input.tokenNumber),
+    uhid: input.uhid,
+    patient_name: input.patientName.trim(),
+    phone: input.phone,
+    department: input.department,
+    doctor_id: input.doctorCode,
+    doctor_name: input.doctorName,
+    status: PATIENT_BOOKING_STATUS,
+    source: PATIENT_BOOKING_SOURCE,
+    appointment_date: input.appointmentDate,
+  };
+}
+
+function missingColumnFromError(message: string | null | undefined): string | null {
+  const match = String(message ?? '').match(/Could not find the '([^']+)' column/i);
+  return match?.[1] ?? null;
+}
+
+function toDirectDbPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const { hospital_code: _hospitalCode, facility_code: _facilityCode, ...dbPayload } = payload;
+  return dbPayload;
+}
+
+async function insertDirectLedgerRow(
+  table: 'appointments' | 'patient_appointments',
+  payload: Record<string, unknown>,
+): Promise<{ data: Record<string, unknown> | null; errorMessage: string | null }> {
+  try {
+    const dbPayload: Record<string, unknown> = toDirectDbPayload(payload);
+    let { data, error } = await supabase.from(table).insert([dbPayload]).select().maybeSingle();
+
+    let retries = 0;
+    while (error && retries < 8) {
+      const missingColumn = missingColumnFromError(error.message);
+      if (!missingColumn || !(missingColumn in dbPayload)) break;
+      delete dbPayload[missingColumn];
+      retries += 1;
+      const retry = await supabase.from(table).insert([dbPayload]).select().maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error && isUuidColumnError(error.message) && table === 'appointments') {
+      const uuidPayload: Record<string, unknown> = { ...dbPayload, hospital_id: REGAL_HOSPITAL_ID };
+      const retry = await supabase.from(table).insert([uuidPayload]).select().maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    if (error) {
+      return { data: null, errorMessage: error.message || 'Booking failed' };
+    }
+
+    return { data: (data as Record<string, unknown> | null) ?? null, errorMessage: null };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : `${table} insert failed`;
+    return { data: null, errorMessage: message };
+  }
+}
+
+async function insertAppointmentsLedger(
+  payload: Record<string, unknown>,
+): Promise<{ data: Record<string, unknown> | null; errorMessage: string | null }> {
+  return insertDirectLedgerRow('appointments', payload);
+}
+
+async function insertPatientAppointmentsLedger(
+  payload: Record<string, unknown>,
+): Promise<{ data: Record<string, unknown> | null; errorMessage: string | null }> {
+  return insertDirectLedgerRow('patient_appointments', payload);
 }
 
 function buildConfirmedLocalMirrorRecord(
@@ -448,7 +512,16 @@ export default function BookAppointmentPage() {
     setBookedSummary(null);
 
     try {
-      const cleanPatientName = stripRelationshipTag(selectedPatientName);
+      const patientSession = readPatientPortalSession();
+      if (!patientSession) {
+        toast.error('Session expired. Please log in again.');
+        router.push('/patient/login');
+        return;
+      }
+
+      const cleanPatientName = stripRelationshipTag(
+        selectedPatientName || patientSession.patient_name,
+      );
       const doctorEntry = findDoctorDirectoryEntry(selectedDoctorName);
 
       if (!cleanPatientName.trim()) {
@@ -463,26 +536,37 @@ export default function BookAppointmentPage() {
         return;
       }
 
-      const rawDoctorName = selectedDoctorName;
+      const rawDoctorName = selectedDoctorName.trim();
       const rawDoctorCode = selectedDoctorCode.trim().toUpperCase();
+      const department = (selectedDept || doctorEntry?.department || '').trim();
+      if (!department) {
+        setErrorMessage('Doctor department is required.');
+        toast.error('Doctor department is required.');
+        return;
+      }
+
+      const targetHospitalId = patientSession.hospital_id || HOSPITAL_TENANT_ID;
+      const tokenUhid = patientSession.uhid || mintPatientUhid();
       const selectedTime = slotTime;
       const calculatedToken = await calculateNextTokenNumber(
         rawDoctorCode,
         rawDoctorName,
         appointmentDate,
       );
-      const tokenString = formatBookingTokenLabel(calculatedToken);
       const clinicalReason = reason.trim();
       const nowIso = new Date().toISOString();
       const resolvedPatientId = resolveBookingPatientId();
-      const department = selectedDept || doctorEntry?.department || '';
       const resolvedDate = appointmentDate || new Date().toISOString().split('T')[0];
 
       persistActivePatientNode(resolvedPatientId, cleanPatientName);
 
-      const patientPayload = buildPatientAppointmentPayload({
+      const bookingInput: FullyAliasedBookingInput = {
         patientId: resolvedPatientId,
         patientName: cleanPatientName,
+        uhid: tokenUhid,
+        phone: patientSession.phone,
+        hospitalId: targetHospitalId,
+        hospitalName: patientSession.hospital_name,
         doctorName: rawDoctorName,
         doctorCode: rawDoctorCode,
         department,
@@ -492,95 +576,46 @@ export default function BookAppointmentPage() {
         reason: clinicalReason,
         tokenNumber: calculatedToken,
         nowIso,
-      });
+      };
 
-      const appointmentsPayload = buildAppointmentsLedgerPayload({
-        patientId: resolvedPatientId,
-        patientName: cleanPatientName,
-        doctorName: rawDoctorName,
-        doctorCode: rawDoctorCode,
-        department,
-        appointmentDate: resolvedDate,
-        slotTime: selectedTime,
-        consultationFee,
-        reason: clinicalReason,
-        tokenNumber: calculatedToken,
-        nowIso,
-      });
-
-      console.log('Sending patient_appointments payload to Supabase:', patientPayload);
+      const patientPayload = buildPatientAppointmentPayload(bookingInput);
+      const appointmentsPayload = buildAppointmentsLedgerPayload(bookingInput);
 
       let savedRecord: Record<string, unknown> | null = null;
-      let persistenceSource: 'patient_appointments' | 'appointments' | 'local' = 'local';
-      let patientErrorMessage: string | null = null;
 
-      // Primary persistence — patient_appointments
-      try {
-        const { data: patientData, error: patientError } = await supabase
-          .from('patient_appointments')
-          .insert([patientPayload])
-          .select()
-          .maybeSingle();
-
-        if (patientError) {
-          patientErrorMessage = patientError.message || 'Unknown patient_appointments error';
-          console.error('Supabase error inserting patient_appointments:', patientErrorMessage);
-        } else if (patientData) {
-          savedRecord = patientData as Record<string, unknown>;
-          persistenceSource = 'patient_appointments';
-        }
-      } catch (primaryErr) {
-        patientErrorMessage =
-          primaryErr instanceof Error ? primaryErr.message : 'patient_appointments insert failed';
-        console.error('patient_appointments insert exception:', primaryErr);
+      const ledgerResult = await insertAppointmentsLedger(appointmentsPayload);
+      if (ledgerResult.data) {
+        savedRecord = ledgerResult.data;
       }
 
-      // Auxiliary mirror — appointments ledger (isolated; never blocks booking)
-      try {
-        console.log('Sending appointments ledger payload to Supabase:', appointmentsPayload);
-
-        const { data: appointmentData, error: appointmentError } = await supabase
-          .from('appointments')
-          .insert([appointmentsPayload])
-          .select()
-          .maybeSingle();
-
-        if (appointmentError) {
-          console.warn('appointments mirror skipped:', appointmentError.message);
-        } else if (appointmentData && !savedRecord) {
-          savedRecord = appointmentData as Record<string, unknown>;
-          persistenceSource = 'appointments';
-        }
-      } catch (mirrorErr) {
-        console.warn('appointments mirror exception (non-blocking):', mirrorErr);
+      const patientResult = await insertPatientAppointmentsLedger(patientPayload);
+      if (patientResult.data && !savedRecord) {
+        savedRecord = patientResult.data;
       }
 
-      // Local fallback when Supabase schema/cache rejects the primary insert
+      try {
+        await supabase.from('hospital_opd_queue').insert([buildOpdQueuePayload(bookingInput)]);
+      } catch (queueErr) {
+        console.warn('hospital_opd_queue mirror skipped:', queueErr);
+      }
+
       if (!savedRecord) {
-        const canFallbackLocally =
-          !patientErrorMessage || isSchemaCacheError(patientErrorMessage);
-
-        if (canFallbackLocally) {
-          mirrorAppointmentToLocalStorage(
-            buildConfirmedLocalMirrorRecord(patientPayload, appointmentsPayload, nowIso),
-          );
-          savedRecord = patientPayload;
-          persistenceSource = 'local';
-        } else {
-          setErrorMessage(`Booking could not be saved. ${patientErrorMessage}`);
-          toast.error(`Booking failed: ${patientErrorMessage}`);
-          return;
-        }
-      } else {
-        mirrorAppointmentToLocalStorage(
-          buildConfirmedLocalMirrorRecord(
-            patientPayload,
-            appointmentsPayload,
-            nowIso,
-            savedRecord,
-          ),
-        );
+        const failMessage =
+          ledgerResult.errorMessage || patientResult.errorMessage || 'Booking failed';
+        console.error('Booking failed:', failMessage);
+        setErrorMessage(`Booking failed: ${failMessage}`);
+        toast.error(`Booking failed: ${failMessage}`);
+        return;
       }
+
+      mirrorAppointmentToLocalStorage(
+        buildConfirmedLocalMirrorRecord(
+          patientPayload,
+          appointmentsPayload,
+          nowIso,
+          savedRecord,
+        ),
+      );
 
       setBookedSummary({
         token: calculatedToken,
@@ -589,12 +624,7 @@ export default function BookAppointmentPage() {
         slot: selectedTime,
       });
       setSuccess(true);
-
-      if (persistenceSource === 'local') {
-        toast.warning(`Appointment saved locally. Token: ${tokenString}`);
-      } else {
-        toast.success(`Appointment confirmed! Token: ${tokenString}`);
-      }
+      toast.success(`Appointment confirmed with ${rawDoctorName}!`);
 
       setTimeout(() => {
         router.push('/patient/appointments');

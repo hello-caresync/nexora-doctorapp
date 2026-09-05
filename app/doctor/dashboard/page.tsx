@@ -2,7 +2,18 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
+import {
+  appointmentBelongsToDoctor,
+  getDoctorSession,
+  resolveDoctorSessionIdentity,
+  type DoctorSession,
+} from '@/lib/doctor/session';
+import { CACHE_KEYS, readLocalJson, writeLocalJson } from '@/lib/persistence/local-cache';
+import { dedupeEncounterList } from '@/lib/queue/dedupe-encounters';
+import { dispatchDigitalPrescription } from '@/lib/doctor/dispatch-prescription';
+import { toast } from 'sonner';
 import {
   Clock,
   Plus,
@@ -30,9 +41,11 @@ interface ActiveDoctorSession {
 
 type QueueAppointment = {
   id: string;
+  appointment_id?: string;
   patient_id?: string | null;
   patient_name?: string;
   name?: string;
+  uhid?: string;
   age?: number | string;
   gender?: string;
   chief_complaint?: string;
@@ -45,6 +58,7 @@ type QueueAppointment = {
   vitals_summary?: string;
   doctor_id?: string;
   doctor_code?: string;
+  doctor_employee_id?: string;
   doctor_name?: string;
   created_at?: string;
   _source_table?: string;
@@ -55,6 +69,8 @@ type MedicationRow = {
   dosage: string;
   timing: string;
   duration: string;
+  qty: number;
+  price: number;
 };
 
 type HistoryItem = {
@@ -74,6 +90,31 @@ type EmergencyRecord = {
   status?: string;
 };
 
+type DoctorQueueCache = {
+  doctorId: string;
+  appointments: QueueAppointment[];
+  activePatientId?: string | null;
+};
+
+function readDoctorSessionFromStorage(): ActiveDoctorSession | null {
+  const stored = getDoctorSession();
+  if (!stored?.doctorId || !stored.doctorName) return null;
+  return {
+    doctorId: stored.doctorId,
+    doctorName: stored.doctorName,
+    department: stored.department || 'Clinical',
+    specialization: stored.specialization,
+    email: stored.email || '',
+    portalRoute: stored.portalRoute,
+  };
+}
+
+function readDoctorQueueCache(doctorId: string): DoctorQueueCache | null {
+  const cached = readLocalJson<DoctorQueueCache>(CACHE_KEYS.doctorQueue);
+  if (!cached || cached.doctorId !== doctorId || !Array.isArray(cached.appointments)) return null;
+  return cached;
+}
+
 function formatToken(token?: string | number | null): string {
   if (token === undefined || token === null || String(token).trim() === '') return '—';
   return `#${String(token).replace(/^#/, '')}`;
@@ -81,13 +122,27 @@ function formatToken(token?: string | number | null): string {
 
 export default function DoctorWorkstation() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const [isMounted, setIsMounted] = useState(false);
 
-  const [session, setSession] = useState<ActiveDoctorSession | null>(null);
-  const [appointments, setAppointments] = useState<QueueAppointment[]>([]);
-  const [activePatient, setActivePatient] = useState<QueueAppointment | null>(null);
+  const [session, setSession] = useState<ActiveDoctorSession | null>(() => readDoctorSessionFromStorage());
+  const [appointments, setAppointments] = useState<QueueAppointment[]>(() => {
+    const stored = readDoctorSessionFromStorage();
+    return stored ? readDoctorQueueCache(stored.doctorId)?.appointments ?? [] : [];
+  });
+  const [activePatient, setActivePatient] = useState<QueueAppointment | null>(() => {
+    const stored = readDoctorSessionFromStorage();
+    if (!stored) return null;
+    const cached = readDoctorQueueCache(stored.doctorId);
+    if (!cached?.appointments.length) return null;
+    return cached.appointments.find((row) => row.id === cached.activePatientId) || cached.appointments[0] || null;
+  });
   const [queueTab, setQueueTab] = useState<'waiting' | 'done'>('waiting');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    const stored = readDoctorSessionFromStorage();
+    return !(stored && (readDoctorQueueCache(stored.doctorId)?.appointments.length ?? 0) > 0);
+  });
 
   const [diagnosis, setDiagnosis] = useState('');
   const [clinicalNotes, setClinicalNotes] = useState('');
@@ -96,6 +151,9 @@ export default function DoctorWorkstation() {
   const [drugInput, setDrugInput] = useState('');
   const [dosageInput, setDosageInput] = useState('1-0-1');
   const [durationInput, setDurationInput] = useState('3 Days');
+  const [qtyInput, setQtyInput] = useState(1);
+  const [priceInput, setPriceInput] = useState(150);
+  const [consultationFee, setConsultationFee] = useState(500);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(
     null,
@@ -107,54 +165,41 @@ export default function DoctorWorkstation() {
   const [emergencyArchive, setEmergencyArchive] = useState<EmergencyRecord[]>([]);
 
   useEffect(() => {
-    const raw =
-      typeof window !== 'undefined'
-        ? localStorage.getItem('active_doctor_session') || sessionStorage.getItem('active_doctor_session')
-        : null;
+    setIsMounted(true);
+  }, []);
 
-    if (!raw) {
+  useEffect(() => {
+    if (!isMounted) return;
+    const stored = readDoctorSessionFromStorage();
+    if (!stored) {
       router.replace('/doctor/login');
       return;
     }
+    setSession(stored);
+  }, [isMounted, router]);
 
-    try {
-      const parsed = JSON.parse(raw) as ActiveDoctorSession;
-      if (!parsed.doctorId || !parsed.doctorName) {
-        router.replace('/doctor/login');
-        return;
-      }
-      setSession(parsed);
-    } catch {
-      router.replace('/doctor/login');
-    }
-  }, [router]);
-
-  const fetchCockpitData = useCallback(async () => {
+  const fetchCockpitData = useCallback(async (options?: { showLoader?: boolean }) => {
     if (!session?.doctorId || !session?.doctorName) return;
 
     try {
-      setIsLoading(true);
-      const currentDocId = session.doctorId.trim().toLowerCase();
-      const currentDocName = session.doctorName.replace(/^Dr\.?\s*/i, '').trim().toLowerCase();
+      if (options?.showLoader) {
+        setIsLoading(true);
+      }
 
       const [res1, res2] = await Promise.all([
         supabase.from('patient_appointments').select('*').order('created_at', { ascending: false }),
         supabase.from('appointments').select('*').order('created_at', { ascending: false }),
       ]);
 
-      const isForCurrentDoctor = (item: QueueAppointment) => {
-        const itemDocId = (item.doctor_id || item.doctor_code || '').trim().toLowerCase();
-        const itemDocName = (item.doctor_name || '').replace(/^Dr\.?\s*/i, '').trim().toLowerCase();
-
-        const idMatches = Boolean(itemDocId && currentDocId && itemDocId === currentDocId);
-        const nameMatches = Boolean(
-          itemDocName &&
-            currentDocName &&
-            (itemDocName.includes(currentDocName) || currentDocName.includes(itemDocName)),
-        );
-
-        return idMatches || nameMatches;
+      const doctorSession: DoctorSession = {
+        doctorId: session.doctorId,
+        doctorName: session.doctorName,
+        department: session.department,
+        employeeId: session.doctorId,
       };
+
+      const isForCurrentDoctor = (item: QueueAppointment) =>
+        appointmentBelongsToDoctor(item as Record<string, unknown>, doctorSession);
 
       const rows1 = (res1.data ?? []) as QueueAppointment[];
       const rows2 = (res2.data ?? []) as QueueAppointment[];
@@ -175,19 +220,18 @@ export default function DoctorWorkstation() {
         status: item.status || item.queue_status || 'WAITING',
       }));
 
-      const map = new Map<string, QueueAppointment>();
-      [...list1, ...list2].forEach((item) => {
-        const key = item.id ? String(item.id) : `${item.patient_name}_${item.token_number}_${item.created_at}`;
-        if (!map.has(key)) map.set(key, item);
-      });
-
-      const merged = Array.from(map.values()).sort((a, b) => {
+      const merged = dedupeEncounterList([...list1, ...list2]).sort((a, b) => {
         const tokenA = parseInt(String(a.token_number || '').replace(/\D/g, ''), 10) || 999;
         const tokenB = parseInt(String(b.token_number || '').replace(/\D/g, ''), 10) || 999;
         return tokenA - tokenB;
       });
 
       setAppointments(merged);
+      writeLocalJson(CACHE_KEYS.doctorQueue, {
+        doctorId: session.doctorId,
+        appointments: merged,
+        activePatientId: merged[0]?.id ?? null,
+      });
 
       const isCompletedStatus = (s?: string) => {
         const st = (s || '').trim().toUpperCase();
@@ -228,31 +272,35 @@ export default function DoctorWorkstation() {
 
   useEffect(() => {
     if (!session) return;
-    fetchCockpitData();
+    void fetchCockpitData({ showLoader: true });
 
     const channel = supabase
       .channel(`doc_node_${session.doctorId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'patient_appointments' }, () =>
-        fetchCockpitData(),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, () =>
-        fetchCockpitData(),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_admissions' }, () =>
-        fetchCockpitData(),
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'patient_appointments' }, () => {
+        void fetchCockpitData({ showLoader: false });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'appointments' }, () => {
+        void fetchCockpitData({ showLoader: false });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_admissions' }, () => {
+        void fetchCockpitData({ showLoader: false });
+      })
       .subscribe();
 
-    const interval = setInterval(fetchCockpitData, 3000);
-
     return () => {
-      supabase.removeChannel(channel);
-      clearInterval(interval);
+      void supabase.removeChannel(channel);
     };
   }, [fetchCockpitData, session]);
 
   const handleSelectPatient = async (patient: QueueAppointment) => {
     setActivePatient(patient);
+    if (session?.doctorId) {
+      writeLocalJson(CACHE_KEYS.doctorQueue, {
+        doctorId: session.doctorId,
+        appointments,
+        activePatientId: patient.id,
+      });
+    }
     setDiagnosis(patient.chief_complaint || patient.reason_for_visit || '');
     setClinicalNotes('');
     setDoctorAdvice('');
@@ -308,91 +356,96 @@ export default function DoctorWorkstation() {
     if (!drugInput.trim()) return;
     setMedications((prev) => [
       ...prev,
-      { name: drugInput.trim(), dosage: dosageInput, timing: 'After Food', duration: durationInput },
+      {
+        name: drugInput.trim(),
+        dosage: dosageInput,
+        timing: 'After Food',
+        duration: durationInput,
+        qty: Math.max(1, Number(qtyInput) || 1),
+        price: Math.max(0, Number(priceInput) || 0),
+      },
     ]);
     setDrugInput('');
   };
 
   const handleDoneAndDispatch = async () => {
-    if (!activePatient || !session) return;
+    if (!activePatient) {
+      toast.error('Please select an active patient encounter first.');
+      return;
+    }
+
+    if (!session) {
+      toast.error('Doctor session is missing. Please sign in again.');
+      return;
+    }
+
+    const activeAppointmentId = String(activePatient.appointment_id || activePatient.id || '').trim();
+    const patientId = String(activePatient.patient_id || activePatient.uhid || '').trim();
+    const patientName = (activePatient.patient_name || activePatient.name || '').trim();
+    const complaint = activePatient.chief_complaint || activePatient.reason_for_visit || '';
+
+    if (!patientId && !patientName) {
+      toast.error('Please select an active patient encounter first.');
+      return;
+    }
+
+    const doctor = resolveDoctorSessionIdentity(
+      getDoctorSession() ?? {
+        doctorId: session.doctorId,
+        doctorName: session.doctorName,
+        department: session.department,
+        employeeId: session.doctorId,
+      },
+    );
 
     setIsFinalizing(true);
     setStatusMessage(null);
 
-    const targetId = String(activePatient.id);
-    const pName = activePatient.patient_name || activePatient.name || '';
-    const pId = activePatient.patient_id ? String(activePatient.patient_id) : null;
-    const complaint = activePatient.chief_complaint || activePatient.reason_for_visit || '';
-
-    if (!pId) {
-      setStatusMessage({
-        type: 'error',
-        text: 'Cannot dispatch prescription without a verified patient_id on the appointment record.',
-      });
-      setIsFinalizing(false);
-      return;
-    }
-
-    if (!pName) {
-      setStatusMessage({ type: 'error', text: 'Cannot dispatch prescription without a verified patient name.' });
-      setIsFinalizing(false);
-      return;
-    }
-
     try {
-      const { error: rxError } = await supabase.from('prescriptions').insert([
-        {
-          appointment_id: targetId,
-          patient_id: pId,
-          patient_name: pName,
-          doctor_name: session.doctorName,
-          doctor_id: session.doctorId,
-          diagnosis: diagnosis.trim() || complaint,
-          medications,
-          instructions: doctorAdvice.trim() || '',
-          status: 'DISPATCHED',
-          created_at: new Date().toISOString(),
-        },
-      ]);
+      const result = await dispatchDigitalPrescription(supabase, {
+        appointmentId: activeAppointmentId,
+        sourceTable: activePatient._source_table,
+        patientId: patientId || null,
+        patientName: patientName || 'Patient',
+        uhid: activePatient.uhid || patientId || null,
+        doctorId: doctor.employeeId || doctor.doctorId,
+        doctorName: doctor.doctorName,
+        department: doctor.department || session.department,
+        diagnosis: diagnosis.trim() || complaint || 'General Consultation',
+        clinicalNotes: clinicalNotes.trim(),
+        doctorInstructions: doctorAdvice.trim(),
+        medications,
+        vitals: activePatient.vitals_summary || null,
+        consultationFee,
+        hospitalId: 'HOSP-01',
+      });
 
-      if (rxError) throw rxError;
+      if (!result.ok) {
+        throw new Error(result.error || 'Failed to write prescription to the patient app.');
+      }
 
       await Promise.allSettled([
-        supabase
-          .from('patient_appointments')
-          .update({ status: 'COMPLETED', queue_status: 'COMPLETED' })
-          .eq('id', targetId),
-        supabase
-          .from('appointments')
-          .update({ status: 'COMPLETED', queue_status: 'COMPLETED' })
-          .eq('id', targetId),
+        queryClient.invalidateQueries({ queryKey: ['doctor-queue'] }),
+        queryClient.invalidateQueries({ queryKey: ['doctor-records'] }),
+        queryClient.invalidateQueries({ queryKey: ['patient-prescriptions'] }),
       ]);
 
-      await supabase.from('consultations').insert([
-        {
-          appointment_id: targetId,
-          patient_id: pId,
-          patient_name: pName,
-          doctor_name: session.doctorName,
-          doctor_id: session.doctorId,
-          chief_complaint: complaint,
-          diagnosis: diagnosis.trim() || complaint,
-          clinical_notes: clinicalNotes.trim() || '',
-          status: 'COMPLETED',
-          created_at: new Date().toISOString(),
-        },
-      ]);
-
-      setStatusMessage({ type: 'success', text: `Prescription dispatched successfully for ${pName}.` });
+      toast.success('Consultation billed and prescription dispatched to patient + hospital cashier.');
+      setStatusMessage({
+        type: 'success',
+        text: 'Pending invoice posted to Hospital Billing & Checkout Queue.',
+      });
       setDiagnosis('');
       setClinicalNotes('');
       setDoctorAdvice('');
       setMedications([]);
-      fetchCockpitData();
+      setDrugInput('');
+      await fetchCockpitData({ showLoader: false });
     } catch (err: unknown) {
-      console.error('Dispatch failed:', err);
-      const message = err instanceof Error ? err.message : 'Failed to dispatch prescription to patient app.';
-      setStatusMessage({ type: 'error', text: message });
+      console.error('Error dispatching prescription:', err);
+      const message = err instanceof Error ? err.message : 'Unknown database error';
+      setStatusMessage({ type: 'error', text: `Dispatch failed: ${message}` });
+      toast.error(`Dispatch failed: ${message}`);
     } finally {
       setIsFinalizing(false);
     }
@@ -404,7 +457,7 @@ export default function DoctorWorkstation() {
     router.replace('/doctor/login');
   };
 
-  if (!session) {
+  if (!isMounted || !session) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-[#F8FAFC]">
         <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
@@ -460,7 +513,7 @@ export default function DoctorWorkstation() {
 
           <button
             type="button"
-            onClick={fetchCockpitData}
+            onClick={() => void fetchCockpitData({ showLoader: true })}
             className="p-2 bg-white hover:bg-slate-50 border border-slate-200 rounded-xl text-slate-600 transition-all cursor-pointer"
             title="Refresh Live Data"
           >
@@ -696,6 +749,28 @@ export default function DoctorWorkstation() {
                   Prescription Pad ({medications.length} Prescribed)
                 </span>
 
+                <div className="mb-2.5 grid grid-cols-2 gap-2 shrink-0">
+                  <label className="text-[10px] font-black uppercase tracking-wider text-slate-600">
+                    Consultation fee (₹)
+                    <input
+                      type="number"
+                      min={0}
+                      value={consultationFee}
+                      onChange={(e) => setConsultationFee(Number(e.target.value) || 0)}
+                      className="mt-1 w-full text-xs font-mono font-bold p-2 bg-white border border-slate-200 rounded-xl outline-none"
+                    />
+                  </label>
+                  <div className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-2">
+                    <div className="text-[10px] font-black uppercase text-teal-800">Bill preview</div>
+                    <div className="text-sm font-black text-teal-950 font-mono">
+                      ₹
+                      {consultationFee +
+                        medications.reduce((sum, med) => sum + med.qty * med.price, 0)}
+                    </div>
+                    <div className="text-[10px] text-teal-700">Consult + medicines → cashier</div>
+                  </div>
+                </div>
+
                 <form onSubmit={handleAddMedication} className="flex flex-wrap items-center gap-2 mb-2.5 shrink-0">
                   <input
                     type="text"
@@ -726,6 +801,22 @@ export default function DoctorWorkstation() {
                     <option value="15 Days">15 Days</option>
                     <option value="30 Days">30 Days</option>
                   </select>
+                  <input
+                    type="number"
+                    min={1}
+                    value={qtyInput}
+                    onChange={(e) => setQtyInput(Number(e.target.value) || 1)}
+                    className="w-16 text-xs p-2 bg-white border border-slate-200 rounded-xl font-mono"
+                    title="Quantity"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={priceInput}
+                    onChange={(e) => setPriceInput(Number(e.target.value) || 0)}
+                    className="w-20 text-xs p-2 bg-white border border-slate-200 rounded-xl font-mono"
+                    title="Unit price"
+                  />
                   <button
                     type="submit"
                     className="px-3.5 py-2 bg-teal-800 hover:bg-teal-900 text-white rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer shrink-0"
@@ -752,6 +843,9 @@ export default function DoctorWorkstation() {
                             {med.dosage}
                           </span>
                           <span className="text-slate-600 text-[11px]">{med.duration}</span>
+                          <span className="font-mono text-[10px] font-bold text-slate-700">
+                            {med.qty} × ₹{med.price}
+                          </span>
                           <button
                             type="button"
                             onClick={() => setMedications((prev) => prev.filter((_, idx) => idx !== i))}

@@ -3,13 +3,15 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { ensureDoctorUuid } from '@/lib/doctor/command-center/doctor-context';
 import { DEFAULT_ACTIVE_DOCTOR_ID } from '@/lib/doctor/command-center/supabase-service';
 import {
+  HOSPITAL_TENANT_ID,
   REGAL_FACILITY_CODE,
   REGAL_HOSPITAL_ID,
 } from '@/lib/regal/constants';
+import { canonicalHospitalId, hospitalIdQueryValues, isUuidColumnError } from '@/lib/hospital/hospital-node';
 
 import type { AppointmentLifecycleStatus } from './types';
 
-export { REGAL_HOSPITAL_ID, REGAL_FACILITY_CODE };
+export { REGAL_HOSPITAL_ID, REGAL_FACILITY_CODE, HOSPITAL_TENANT_ID };
 
 export type WalkInRegistrationInput = {
   patient_name: string;
@@ -85,9 +87,9 @@ export function normalizePatientAppointmentToHospital(
   return normalizeHospitalAppointmentRow({
     id: row.id,
     appointment_id: row.id,
-    hospital_id: REGAL_HOSPITAL_ID,
+    hospital_id: canonicalHospitalId(REGAL_HOSPITAL_ID),
     facility_code: REGAL_FACILITY_CODE,
-    hospital_code: REGAL_FACILITY_CODE,
+    hospital_code: HOSPITAL_TENANT_ID,
     patient_id: row.patient_id,
     patient_name: row.patient_name,
     patient_uhid: row.patient_uhid ?? row.uhid,
@@ -303,14 +305,30 @@ async function insertAppointmentRow(
   supabase: SupabaseClient,
   payload: Record<string, unknown>,
 ): Promise<{ data: Record<string, unknown> | null; error: string | null }> {
-  const { data, error } = await supabase.from('appointments').insert(payload).select('*').single();
-  if (!error && data) return { data: data as Record<string, unknown>, error: null };
+  const first = await supabase.from('appointments').insert(payload).select('*').single();
+  if (!first.error && first.data) return { data: first.data as Record<string, unknown>, error: null };
+
+  if (
+    isUuidColumnError(first.error?.message) &&
+    payload.hospital_id &&
+    payload.hospital_id !== REGAL_HOSPITAL_ID
+  ) {
+    const uuidPayload = { ...payload, hospital_id: REGAL_HOSPITAL_ID };
+    const uuidRetry = await supabase.from('appointments').insert(uuidPayload).select('*').single();
+    if (!uuidRetry.error && uuidRetry.data) {
+      return { data: uuidRetry.data as Record<string, unknown>, error: null };
+    }
+  }
+
+  const { error } = first;
 
   const minimal: Record<string, unknown> = {
     appointment_id: payload.appointment_id,
     patient_id: payload.patient_id,
+    hospital_id: payload.hospital_id,
     doctor_id: payload.doctor_id ?? payload.doctor_code,
     doctor_code: payload.doctor_code ?? payload.doctor_id,
+    doctor_name: payload.doctor_name,
     department: payload.department,
     reason_for_visit: payload.reason_for_visit,
     appointment_date: payload.appointment_date,
@@ -466,9 +484,9 @@ export async function registerWalkInAppointment(
   const payload: Record<string, unknown> = {
     id: appointmentId,
     appointment_id: appointmentId,
-    hospital_id: REGAL_HOSPITAL_ID,
+    hospital_id: canonicalHospitalId(REGAL_HOSPITAL_ID),
     facility_code: REGAL_FACILITY_CODE,
-    hospital_code: REGAL_FACILITY_CODE,
+    hospital_code: HOSPITAL_TENANT_ID,
     token_number: tokenNumber,
     uhid,
     patient_uhid: uhid,
@@ -561,6 +579,9 @@ export function buildPatientAppAppointmentPayload(
     patient_id: input.patientId,
     age: input.age ?? 25,
     gender: input.gender ?? 'Female',
+    hospital_id: HOSPITAL_TENANT_ID,
+    hospital_code: HOSPITAL_TENANT_ID,
+    facility_code: REGAL_FACILITY_CODE,
     doctor_id: rawDoctorId,
     doctor_code: rawDoctorId,
     doctor_employee_id: rawDoctorId,
@@ -647,9 +668,9 @@ export async function registerPatientOnlineBooking(
   const payload: Record<string, unknown> = {
     id: appointmentId,
     appointment_id: appointmentId,
-    hospital_id: REGAL_HOSPITAL_ID,
+    hospital_id: canonicalHospitalId(REGAL_HOSPITAL_ID),
     facility_code: REGAL_FACILITY_CODE,
-    hospital_code: REGAL_FACILITY_CODE,
+    hospital_code: HOSPITAL_TENANT_ID,
     token_number: tokenNumber,
     uhid,
     patient_uhid: uhid,
@@ -771,11 +792,13 @@ async function queryAppointmentsForFacility(
   supabase: SupabaseClient,
   facilityCode: string,
 ): Promise<Record<string, unknown>[]> {
+  const hospitalIds = hospitalIdQueryValues(HOSPITAL_TENANT_ID);
+  const idFilter = hospitalIds.map((id) => `hospital_id.eq.${id}`).join(',');
   const facilityFilter = await supabase
     .from('appointments')
     .select('*')
     .or(
-      `facility_code.eq.${facilityCode},hospital_code.eq.${facilityCode},hospital_id.eq.${REGAL_HOSPITAL_ID}`,
+      `facility_code.eq.${facilityCode},hospital_code.eq.${facilityCode},hospital_code.eq.${HOSPITAL_TENANT_ID},${idFilter}`,
     )
     .order('created_at', { ascending: false })
     .limit(200);
@@ -787,7 +810,7 @@ async function queryAppointmentsForFacility(
   const hospitalFilter = await supabase
     .from('appointments')
     .select('*')
-    .eq('hospital_id', REGAL_HOSPITAL_ID)
+    .in('hospital_id', hospitalIds)
     .order('created_at', { ascending: false })
     .limit(200);
 

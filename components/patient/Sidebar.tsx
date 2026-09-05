@@ -7,8 +7,6 @@ import {
   FileText,
   LayoutDashboard,
   LogOut,
-  MessageSquare,
-  ShieldCheck,
   Stethoscope,
   User,
   Users,
@@ -19,8 +17,6 @@ const PATIENT_NAV = [
   { label: 'My Appointments', href: '/patient/appointments', icon: Calendar },
   { label: 'Doctor Directory', href: '/patient/doctors', icon: Users },
   { label: 'Prescriptions', href: '/patient/prescriptions', icon: FileText },
-  { label: 'Medical Records', href: '/patient/records', icon: ShieldCheck },
-  { label: 'Clinical Messaging', href: '/patient/messages', icon: MessageSquare },
   { label: 'Profile & Vitals', href: '/patient/profile', icon: User },
 ] as const;
 

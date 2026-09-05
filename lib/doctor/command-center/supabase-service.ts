@@ -1,4 +1,6 @@
+import { dispatchDigitalPrescription } from '@/lib/doctor/dispatch-prescription';
 import { generatePostConsultationBill } from '@/lib/hospital/operations/consultation-billing-sync';
+import { dedupeEncounterList } from '@/lib/queue/dedupe-encounters';
 import { supabase } from '@/lib/supabase/client';
 import type {
   CompleteEncounterPayload,
@@ -479,8 +481,9 @@ export interface CompleteAppointmentInput {
 export async function completeAppointmentAfterConsultation(
   input: CompleteAppointmentInput,
 ): Promise<boolean> {
+  try {
   const client = supabase;
-  const status = input.status ?? 'COMPLETED';
+  const status = input.status ?? 'completed';
   const payload = { status, updated_at: new Date().toISOString() };
   const patientPayload = {
     queue_status: status,
@@ -489,7 +492,7 @@ export async function completeAppointmentAfterConsultation(
   };
   let dbUpdated = false;
 
-  const appointmentId = isUuid(input.appointmentId ?? '') ? String(input.appointmentId) : null;
+  const appointmentId = input.appointmentId ? String(input.appointmentId).trim() : '';
 
   if (appointmentId) {
     const patientApptUpdate = await client
@@ -612,6 +615,10 @@ export async function completeAppointmentAfterConsultation(
   }
 
   return dbUpdated;
+  } catch (err: unknown) {
+    logSupabaseError('completeAppointmentAfterConsultation failed:', err);
+    return false;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -956,43 +963,54 @@ export async function savePatientClinicalEncounter(
 
   const patientName = input.patientName?.trim();
   const activeDoctorName = input.doctorName?.trim();
-  const activeDoctorId = doctorId;
+  const rawAppointmentId = input.appointmentId ? String(input.appointmentId).trim() : '';
+  const rawPatientId = input.patientId ? String(input.patientId).trim() : '';
+  const rawDoctorId = input.doctorId ? String(input.doctorId).trim() : doctorId;
 
-  const prescriptionPayload = {
-    consultation_id: createdConsultationId || null,
-    appointment_id: appointmentId || createdConsultationId || null,
-    patient_id: patientId || null,
-    patient_name: patientName || 'Patient',
-    doctor_id: activeDoctorId || DEFAULT_ACTIVE_DOCTOR_ID,
-    doctor_name: activeDoctorName || 'Dr. Chandrakanth S Kesari',
-    medications: medicineList || [],
-    medicines: medicineList || [],
-    special_instructions: instructionsInput || '',
-    instructions: instructionsInput || '',
-  };
+  const rxResult = await dispatchDigitalPrescription(client, {
+    appointmentId: rawAppointmentId || createdConsultationId,
+    patientId: rawPatientId || patientId || null,
+    patientName: patientName || 'Patient',
+    doctorId: rawDoctorId || DEFAULT_DOCTOR_EMPLOYEE_ID,
+    doctorName: activeDoctorName || DEFAULT_ACTIVE_DOCTOR_NAME,
+    diagnosis: diagnosis || chiefComplaint || 'Clinical review',
+    clinicalNotes: notes,
+    doctorInstructions: instructionsInput,
+    medications: medicineList.map((med) => ({
+      name: med.name,
+      dosage: med.dosage,
+      timing: med.frequency,
+      duration: med.duration,
+    })),
+    vitals: {
+      temperature: tempValue,
+      bp: bpSysValue != null && bpDiaValue != null ? `${bpSysValue}/${bpDiaValue}` : null,
+      pulse: pulseValue,
+      spo2: spo2Value,
+      weight: weightValue,
+    },
+  });
 
-  const { data: prescription, error: rxError } = await client
-    .from('prescriptions')
-    .insert([prescriptionPayload])
-    .select('*')
-    .single();
-
-  if (rxError) {
-    throw new Error(rxError.message || rxError.details || 'Prescription insert failed');
+  if (!rxResult.ok) {
+    throw new Error(rxResult.error || 'Prescription insert failed');
   }
 
-  if (appointmentId) {
-    await updateAppointmentStatus(appointmentId, 'COMPLETED');
+  if (rawAppointmentId) {
+    try {
+      await completeAppointmentAfterConsultation({
+        appointmentId: rawAppointmentId,
+        patientId: rawPatientId || patientId || null,
+        patientName: patientName || undefined,
+        status: 'completed',
+      });
+    } catch (statusErr: unknown) {
+      console.warn('[Consultation Save] appointment status update skipped:', statusErr);
+    }
   }
 
   return {
     consultation_id: createdConsultationId,
-    prescription_id:
-      prescription?.id != null
-        ? String(prescription.id)
-        : prescription?.prescription_id != null
-          ? String(prescription.prescription_id)
-          : undefined,
+    prescription_id: undefined,
   };
 }
 
@@ -1360,22 +1378,21 @@ async function fetchQueueForDoctorId(
 ): Promise<LiveQueueRow[]> {
   const today = todayLocalDate();
 
-  let list = filterTodayRows(await fetchFromView(resolvedDoctorId));
+  const rawList = [
+    ...filterTodayRows(await fetchFromView(resolvedDoctorId)),
+    ...filterTodayRows(await fetchAppointmentsFallback(resolvedDoctorId)),
+    ...filterTodayRows(await fetchFromOpdTokens(resolvedDoctorId)),
+    ...(employeeId ? filterTodayRows(await fetchFromLegacyOpdQueue(employeeId, resolvedDoctorId, today)) : []),
+  ];
 
-  if (list.length === 0) {
-    list = filterTodayRows(await fetchAppointmentsFallback(resolvedDoctorId));
-  }
-  if (list.length === 0) {
-    list = filterTodayRows(await fetchFromOpdTokens(resolvedDoctorId));
-  }
-  if (list.length === 0 && employeeId) {
-    list = filterTodayRows(await fetchFromLegacyOpdQueue(employeeId, resolvedDoctorId, today));
-  }
-  if (list.length === 0) {
-    list = filterTodayRows(
-      readLocal<LiveQueueRow[]>(STORAGE.queue, []).filter((r) => r.doctor_id === resolvedDoctorId),
-    );
-  }
+  const uniqueQueue = dedupeEncounterList(rawList);
+
+  const list =
+    uniqueQueue.length > 0
+      ? uniqueQueue
+      : filterTodayRows(
+          readLocal<LiveQueueRow[]>(STORAGE.queue, []).filter((r) => r.doctor_id === resolvedDoctorId),
+        );
 
   const others = readLocal<LiveQueueRow[]>(STORAGE.queue, []).filter(
     (r) => r.doctor_id !== resolvedDoctorId,
@@ -1403,19 +1420,34 @@ export async function fetchDoctorDashboardData(
   try {
     const metrics = await getDoctorDashboardData(resolvedDoctorId);
     const tokenRows = metrics.liveQueueTokens.map(mapOpdTokenToLiveQueueRow);
-    const fromTokens = filterTodayRows(tokenRows);
+    const appointmentRows = metrics.appointmentsList.map((appt, index) =>
+      normalizeAppointmentFallbackRow(
+        {
+          appointment_id: appt.appointment_id,
+          patient_id: appt.patient_id,
+          doctor_id: appt.doctor_id,
+          token_number: appt.token_number,
+          status: appt.status,
+          reason_for_visit: appt.reason,
+          appointment_date: appt.appointment_date,
+          appointment_time: appt.appointment_time,
+          patient_profiles: { full_name: appt.patient_name },
+        },
+        resolvedDoctorId,
+        index,
+      ),
+    );
+    const uniqueQueue = dedupeEncounterList([
+      ...filterTodayRows(tokenRows),
+      ...filterTodayRows(appointmentRows),
+    ]);
 
-    if (fromTokens.length > 0 || metrics.appointmentsList.length > 0) {
-      const liveQueueList =
-        fromTokens.length > 0
-          ? fromTokens
-          : await fetchQueueForDoctorId(resolvedDoctorId, scope?.employeeId);
-
+    if (uniqueQueue.length > 0) {
       return {
         doctorId: resolvedDoctorId,
-        liveQueueList,
+        liveQueueList: uniqueQueue,
         todaysOpd: metrics.todaysOpd,
-        waitingQueue: metrics.waitingQueue,
+        waitingQueue: uniqueQueue.filter((row) => isWaitingStatus(row.status)).length,
       };
     }
   } catch {
@@ -1475,8 +1507,7 @@ export async function fetchLiveDoctorQueue(
 
   if (!doctorUuid) return [];
 
-  const list = await fetchQueueForDoctorId(doctorUuid, employeeId);
-  return list;
+  return dedupeEncounterList(await fetchQueueForDoctorId(doctorUuid, employeeId));
 }
 
 /** Convenience: resolve doctor + fetch queue + compute KPI snapshot in one call. */

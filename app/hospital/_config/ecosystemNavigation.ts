@@ -192,8 +192,7 @@ export const ECOSYSTEM_NAV_LAYERS: EcosystemNavLayer[] = [
         links: [
           { id: 'pat-dash', label: 'Patient Dashboard', href: '/patient/dashboard', external: true },
           { id: 'pat-book', label: 'Appointment Booking', href: '/patient/appointments', external: true },
-          { id: 'pat-records', label: 'Medical Records History', href: '/patient/health', external: true },
-          { id: 'pat-rx', label: 'Active Prescriptions', href: '/patient/medications', external: true },
+          { id: 'pat-rx', label: 'Active Prescriptions', href: '/patient/prescriptions', external: true },
           { id: 'pat-labs', label: 'Lab & Radiology Reports', href: '/patient/diagnostics', external: true },
           { id: 'pat-bill', label: 'Billing & Online Payment', href: '/patient/billing', external: true },
           { id: 'pat-notify', label: 'Notification Stream', href: '/patient/communication', external: true },

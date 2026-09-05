@@ -3,12 +3,13 @@
 import React, { useEffect, useState, type ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Toaster } from 'sonner';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 import { EcosystemNotificationBell } from '@/components/ecosystem/EcosystemNotificationBell';
 import { PatientSidebar } from '@/components/patient/Sidebar';
 import { PatientClinicalRealtimeBridge } from '@/components/patient/PatientClinicalRealtimeBridge';
 import { ensurePatientIdPersisted, resolveActivePatientId } from '@/lib/clinical/bridge';
+import { PatientAuthProvider } from '@/lib/patient/auth/PatientAuthProvider';
 
 function isAuthRoute(pathname: string | null) {
   return Boolean(pathname?.includes('/auth/login') || pathname?.endsWith('/login'));
@@ -53,45 +54,63 @@ export default function PatientLayout({ children }: { children: ReactNode }) {
 
   if (isAuthRoute(pathname)) {
     return (
-      <>
+      <PatientAuthProvider>
         {children}
         <Toaster position="top-right" closeButton />
-      </>
+      </PatientAuthProvider>
     );
   }
 
   if (!hydrated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F4F8F7]">
-        <div className="flex items-center gap-3 rounded-2xl bg-[#113831] px-6 py-4 text-white shadow-xl">
-          <Loader2 className="h-5 w-5 animate-spin text-[#EAF5F2]" />
-          <span className="text-xs font-black">Connecting to Patient Workspace…</span>
+      <PatientAuthProvider>
+        <div className="flex min-h-screen items-center justify-center bg-[#F4F8F7]">
+          <div className="flex items-center gap-3 rounded-2xl bg-[#113831] px-6 py-4 text-white shadow-xl">
+            <Loader2 className="h-5 w-5 animate-spin text-[#EAF5F2]" />
+            <span className="text-xs font-black">Connecting to Patient Workspace…</span>
+          </div>
         </div>
-      </div>
+      </PatientAuthProvider>
     );
   }
 
   return (
-    <div className="flex min-h-screen bg-[#F4F8F7] font-sans text-[#0E2924]">
+    <PatientAuthProvider>
+      <div className="flex min-h-screen bg-[#F4F8F7] font-sans text-[#0E2924]">
       <PatientSidebar patientName={patientName} onLogout={handleLogout} />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto md:ml-64">
-        <header className="sticky top-0 z-20 flex items-center justify-between border-b border-[#D5E8E3] bg-white/95 px-6 py-4 shadow-sm backdrop-blur-md md:px-8">
-          <div className="flex min-w-0 items-center gap-3">
-            <ShieldCheck className="h-5 w-5 shrink-0 text-[#227B6B]" />
-            <span className="truncate text-xs font-black text-[#0E2924]">
-              Verified Patient Session • {patientName}
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <EcosystemNotificationBell
-              app="patient"
-              recipientId={patientId}
-              className="bg-[#EAF5F2] text-[#113831] hover:bg-[#DAF0EB]"
-            />
-            <span className="rounded-full bg-[#113831] px-3.5 py-1 text-[10px] font-black uppercase text-white shadow-sm">
-              Live Sync
-            </span>
+        <header className="bg-white border-b border-gray-100 py-3 px-6 shadow-xs sticky top-0 z-40">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="bg-white p-1 rounded-lg border border-gray-200/80 shadow-xs flex items-center justify-center">
+                <img
+                  src="/regal-logo.png"
+                  alt="Regal Hospital"
+                  className="h-9 w-auto object-contain"
+                />
+              </div>
+              <span className="hidden sm:inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                SmartQ Patient Portal
+              </span>
+              <span className="truncate text-[11px] font-bold text-slate-500 hidden lg:inline">
+                {patientName}
+              </span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-xs text-gray-500 hidden md:inline font-mono">
+                Helpline: <strong className="text-gray-700">+91 98450 12345</strong>
+              </span>
+              <EcosystemNotificationBell
+                app="patient"
+                recipientId={patientId}
+                className="bg-[#EAF5F2] text-[#113831] hover:bg-[#DAF0EB]"
+              />
+              <div className="text-xs font-medium px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="hidden sm:inline">OPD Live Desk Active</span>
+              </div>
+            </div>
           </div>
         </header>
 
@@ -101,5 +120,6 @@ export default function PatientLayout({ children }: { children: ReactNode }) {
       <PatientClinicalRealtimeBridge />
       <Toaster position="top-right" closeButton richColors />
     </div>
+    </PatientAuthProvider>
   );
 }

@@ -8,7 +8,9 @@ import {
   bookAppointmentWithDoctor,
   type BookAppointmentPayload,
 } from '@/lib/patient/book-appointment';
+import { readPatientPortalSession } from '@/lib/patient/portal-session';
 import { supabase } from '@/lib/supabaseClient';
+import { toast } from 'sonner';
 import {
   AlertCircle,
   Calendar as CalendarIcon,
@@ -124,12 +126,22 @@ function BookAppointmentContent() {
 
   const handleBookAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
+    const patientSession = readPatientPortalSession();
+    if (!patientSession) {
+      toast.error('Session expired. Please log in again.');
+      router.push('/patient/login');
+      return;
+    }
     if (!selectedPatient) {
       setErrorMsg('Please select a valid patient profile.');
       return;
     }
-    if (!selectedDoctor?.doctor_id) {
-      setErrorMsg('Clinician UUID not loaded. Please refresh and try again.');
+    if (!selectedDoctor?.employeeId && !selectedDoctor?.doctor_id) {
+      setErrorMsg('Clinician not loaded. Please refresh and try again.');
+      return;
+    }
+    if (!selectedDoctor.department) {
+      setErrorMsg('Doctor department is required.');
       return;
     }
 
@@ -138,19 +150,25 @@ function BookAppointmentContent() {
 
     try {
       await bookAppointmentWithDoctor({
-        patientId: PATIENT_ID,
-        patientName: selectedPatient,
-        patient_name: selectedPatient,
+        patientId: patientSession.patient_id || PATIENT_ID,
+        patientName: selectedPatient || patientSession.patient_name,
+        patient_name: selectedPatient || patientSession.patient_name,
         doctor: selectedDoctor,
+        doctor_id: selectedDoctor.employeeId,
+        doctor_name: selectedDoctor.name,
         appointmentDate,
         slotTime: selectedSlot,
         reasonForVisit,
         hospitalName,
+        hospital_id: patientSession.hospital_id,
       } satisfies BookAppointmentPayload);
 
-      router.push('/patient/appointments');
+      toast.success(`Appointment confirmed with ${selectedDoctor.name}!`);
+      router.push('/patient/dashboard');
     } catch (err: unknown) {
-      setErrorMsg(err instanceof Error ? err.message : 'Failed to record appointment.');
+      const message = err instanceof Error ? err.message : 'Failed to record appointment.';
+      toast.error(`Booking failed: ${message}`);
+      setErrorMsg(message);
     } finally {
       setIsSubmitting(false);
     }

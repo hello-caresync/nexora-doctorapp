@@ -81,11 +81,9 @@ function PrescriptionCard({
           <li key={m.id} className="rounded-xl border border-patient-lavender/30 bg-patient-lavender/5 p-3">
             <p className="font-bold text-patient-charcoal">{m.name} <span className="text-patient-primary">{m.dosage}</span></p>
             <p className="text-sm text-patient-charcoal">{m.frequency} · {m.duration}</p>
-            <p className="mt-1 text-xs text-patient-lavender">{m.instructions}</p>
           </li>
         ))}
       </ul>
-      {rx.notes && <p className="mt-3 text-sm text-patient-lavender">{rx.notes}</p>}
       <button type="button" onClick={onDownload} className={`${v0Ui.btnSecondary} mt-4`}>
         <Download className="h-4 w-4" /> Download PDF
       </button>

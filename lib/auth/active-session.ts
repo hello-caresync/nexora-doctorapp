@@ -1,4 +1,5 @@
 import { clearNexoraRoleCookie, setNexoraRoleCookie } from './role-cookies';
+import { CACHE_KEYS, removeLocalJson } from '@/lib/persistence/local-cache';
 
 export const CURASYNC_ACTIVE_SESSION_KEY = 'curasync_active_session';
 export const ADMIN_PROVISIONING_PATH = '/dashboard/staff-credentials';
@@ -79,6 +80,9 @@ export function clearActiveSession(): void {
   localStorage.removeItem(CURASYNC_ACTIVE_SESSION_KEY);
   localStorage.removeItem('curasync_admin_session');
   localStorage.removeItem('curasync_staff_session');
+  removeLocalJson(CACHE_KEYS.hospitalInfo);
+  removeLocalJson(CACHE_KEYS.opdQueue);
+  removeLocalJson(CACHE_KEYS.hospitalPlatform);
   clearNexoraRoleCookie();
 
   const attrs = 'path=/; max-age=0; SameSite=Lax';

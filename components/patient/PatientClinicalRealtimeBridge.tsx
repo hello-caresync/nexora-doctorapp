@@ -73,12 +73,12 @@ export function PatientClinicalRealtimeBridge() {
             ...msgs,
           ]);
 
-          toast.message('Clinical alert from your doctor', {
-            description: String(msg.message || 'New advice available in Messages.'),
+          toast.message('Update from your doctor', {
+            description: String(msg.message || 'A new clinical update is available.'),
             action: {
-              label: 'Open',
+              label: 'View prescriptions',
               onClick: () => {
-                window.location.href = '/patient/messages/';
+                window.location.href = '/patient/prescriptions/';
               },
             },
           });

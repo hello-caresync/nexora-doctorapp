@@ -46,7 +46,7 @@ export async function fetchDoctorAppointments(
     let query = supabase
       .from('doctor_appointments_view')
       .select('*')
-      .eq('doctor_id', doctorId)
+      .or(`doctor_id.eq.${doctorId},doctor_code.eq.${doctorId},doctor_employee_id.eq.${doctorId}`)
       .order('appointment_date', { ascending: true })
       .order('appointment_time', { ascending: true });
 
@@ -68,7 +68,7 @@ export async function fetchDoctorAppointments(
       .select(
         '*, patient_profiles(full_name, gender, dob, blood_group), doctors(full_name), opd_tokens(token_number, sequence_number, status, estimated_wait_minutes)',
       )
-      .eq('doctor_id', doctorId)
+      .or(`doctor_id.eq.${doctorId},doctor_code.eq.${doctorId},doctor_employee_id.eq.${doctorId}`)
       .order('appointment_date', { ascending: true })
       .order('appointment_time', { ascending: true });
 
@@ -89,12 +89,12 @@ export async function fetchDoctorAppointments(
       return mapAppointmentRow({
         appointment_id: row.appointment_id,
         patient_id: row.patient_id,
-        doctor_id: row.doctor_id,
-        patient_name: profile?.full_name,
+        doctor_id: row.doctor_id ?? row.doctor_code ?? row.doctor_employee_id,
+        patient_name: profile?.full_name ?? row.patient_name,
         patient_gender: profile?.gender,
         patient_dob: profile?.dob,
         patient_blood_group: profile?.blood_group,
-        doctor_name: doctor?.full_name,
+        doctor_name: doctor?.full_name ?? row.doctor_name,
         department: row.department,
         reason_for_visit: row.reason_for_visit,
         appointment_date: row.appointment_date,

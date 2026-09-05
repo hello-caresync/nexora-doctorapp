@@ -1,3 +1,6 @@
+import { setNexoraRoleCookie } from '@/lib/auth/role-cookies';
+import { CACHE_KEYS, writeLocalJson } from '@/lib/persistence/local-cache';
+
 export const SESSION_KEYS = {
   admin: 'curasync_active_session',
   staff: 'curasync_staff_session',
@@ -37,8 +40,6 @@ export function parseJsonSession<T>(raw: string | null): T | null {
   }
 }
 
-import { setNexoraRoleCookie } from '@/lib/auth/role-cookies';
-
 const COOKIE_ATTRS = 'path=/; max-age=86400; SameSite=Lax';
 
 function mirrorSessionCookie(name: string, payload: string): void {
@@ -59,10 +60,18 @@ export function persistStaffPortalSession(session: StaffPortalSession): void {
   const payload = JSON.stringify(hospitalSession);
 
   localStorage.setItem(SESSION_KEYS.staff, payload);
+  localStorage.setItem('curasync_staff_session', payload);
   localStorage.setItem('curasync_admin_session', payload);
   localStorage.setItem(SESSION_KEYS.admin, payload);
+  writeLocalJson(CACHE_KEYS.hospitalInfo, {
+    id: session.hospital_id || 'HOSP-01',
+    nodeCode: session.hospital_id || 'HOSP-01',
+    name: session.hospital_name || 'Regal Hospital',
+    adminName: session.full_name || 'Hospital User',
+    adminEmail: session.email || '',
+  });
   setNexoraRoleCookie('staff');
-  document.cookie = `${SESSION_KEYS.staff}=${encodeURIComponent(session.hospital_id)}; ${COOKIE_ATTRS}`;
+  document.cookie = `${SESSION_KEYS.staff}=${encodeURIComponent(payload)}; ${COOKIE_ATTRS}`;
 }
 
 export function getStaffPortalSession(): StaffPortalSession | null {
@@ -70,10 +79,11 @@ export function getStaffPortalSession(): StaffPortalSession | null {
   return parseJsonSession<StaffPortalSession>(localStorage.getItem(SESSION_KEYS.staff));
 }
 
-const HOSPITAL_APP_ROLES = ['Admin', 'Nurse', 'Receptionist', 'Pharmacist'] as const;
+const HOSPITAL_APP_ROLES = ['Admin', 'Nurse', 'Receptionist', 'Pharmacist', 'Staff'] as const;
 
 export function isHospitalAppRole(role?: string | null): boolean {
-  return Boolean(role && (HOSPITAL_APP_ROLES as readonly string[]).includes(role));
+  if (!role || role === 'Doctor' || role === 'SuperAdmin') return false;
+  return (HOSPITAL_APP_ROLES as readonly string[]).includes(role);
 }
 
 export function readHospitalAppSession(): StaffPortalSession | null {

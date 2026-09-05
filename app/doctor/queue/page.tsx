@@ -27,6 +27,8 @@ import {
   subscribeAppointmentsRealtime,
   type LiveAppointmentRecord,
 } from '@/lib/doctor/appointments-realtime';
+import { currentTimeHHmm, getNextPatient } from '@/lib/queue/interleavingEngine';
+import { mapRecordToQueuePatient, partitionQueuePatients } from '@/lib/queue/queue-mapper';
 
 export default function DoctorQueuePage() {
   const router = useRouter();
@@ -59,6 +61,19 @@ export default function DoctorQueuePage() {
   const waitingQueue = appointments.filter((a) => isWaitingStatus(a.status));
   const inConsultationQueue = appointments.filter((a) => isInConsultationStatus(a.status));
   const completedQueue = appointments.filter((a) => a.status === 'COMPLETED');
+  const interleavedPreview = (() => {
+    const patients = waitingQueue.map((row) =>
+      mapRecordToQueuePatient({
+        ...row,
+        status: row.status,
+        queue_type: row.queue_type,
+        appointment_time: row.time_slot,
+        triage_priority: row.triage_priority,
+      }),
+    );
+    const { appointments: booked, walkIns } = partitionQueuePatients(patients);
+    return getNextPatient(booked, walkIns, currentTimeHHmm());
+  })();
 
   const avgWaitMinutes =
     waitingQueue.length === 0
@@ -82,7 +97,10 @@ export default function DoctorQueuePage() {
       const next = await callNextPatientInQueue(appointments, activePatient);
       if (next) {
         await loadQueue();
-        toast.success(`Called ${next.patient_name} into consultation`);
+        const kind = next.queue_type === 'walk_in' ? 'walk-in' : 'appointment';
+        toast.success(`Called ${next.patient_name} (${kind}) into consultation`);
+      } else {
+        toast.info('No arrived patients are inside the interleaving window yet.');
       }
     } catch (err) {
       console.error('[Call Next]:', err);
@@ -130,7 +148,7 @@ export default function DoctorQueuePage() {
             </span>
           </div>
           <p className="mt-0.5 text-xs text-slate-500">
-            Synchronized with patient app bookings via Supabase Realtime
+            Interleaved appointments and walk-ins · Emergency override · 10-minute slot buffer
           </p>
         </div>
 
@@ -226,11 +244,16 @@ export default function DoctorQueuePage() {
             </div>
           ) : (
             <div className="max-h-[260px] space-y-2.5 overflow-y-auto pr-1">
-              {waitingQueue.map((item, idx) => (
+              {waitingQueue.map((item, idx) => {
+                const isRecommended = interleavedPreview.nextPatient?.id === item.id;
+                const isWalkIn = item.queue_type === 'walk_in';
+                return (
                 <div
                   key={item.id}
                   className={`flex items-center justify-between rounded-xl border p-3.5 transition-all hover:bg-slate-100/80 ${
-                    activePatient?.id === item.id
+                    isRecommended
+                      ? 'border-amber-300 bg-amber-50/70'
+                      : activePatient?.id === item.id
                       ? 'border-teal-200/80 bg-teal-50/40'
                       : 'border-slate-200/60 bg-slate-50'
                   }`}
@@ -240,7 +263,21 @@ export default function DoctorQueuePage() {
                       {item.token_number || `#${idx + 1}`}
                     </span>
                     <div>
-                      <p className="text-sm font-semibold text-slate-800">{item.patient_name}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-semibold text-slate-800">{item.patient_name}</p>
+                        <span className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${
+                          isWalkIn
+                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                            : 'bg-violet-50 text-violet-800 border border-violet-200'
+                        }`}>
+                          {isWalkIn ? 'Walk-In' : 'Appointment'}
+                        </span>
+                        {isRecommended && (
+                          <span className="rounded px-1.5 py-0.5 text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
+                            Next
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-slate-400">{item.chief_complaint}</p>
                     </div>
                   </div>
@@ -248,7 +285,8 @@ export default function DoctorQueuePage() {
                     Est. {item.predicted_wait_min ?? 10} min
                   </span>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

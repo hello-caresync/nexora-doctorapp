@@ -6,14 +6,14 @@ import { Loader2, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
-  DEFAULT_ACTIVE_DOCTOR_ID,
-  DEFAULT_ACTIVE_DOCTOR_NAME,
   completeAppointmentAfterConsultation,
   fetchConsultationAppointmentContext,
   formatConsultationSaveError,
   type ConsultationAppointmentContext,
   type ConsultationMedicationItem,
 } from '@/lib/doctor/command-center/supabase-service';
+import { dispatchDigitalPrescription } from '@/lib/doctor/dispatch-prescription';
+import { getDoctorSession, resolveDoctorSessionIdentity } from '@/lib/doctor/session';
 import { supabase } from '@/lib/supabase/client';
 
 interface MedicationRow extends ConsultationMedicationItem {
@@ -106,35 +106,52 @@ export default function ConsultationWorkspaceClient({
 
     setIsSubmitting(true);
     try {
-      const isUUID = (val: string) =>
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val || '');
-
       const patientName = appointment.patient_name || 'Patient';
-      const activeDoctorName = DEFAULT_ACTIVE_DOCTOR_NAME || 'Dr CHANDRAKANTH S KESARI';
+      const doctorIdentity = resolveDoctorSessionIdentity(getDoctorSession());
       const doctorAdvice = clinicalNotes.trim();
-      const prescribedMedicines = medications
-        .filter((med) => med.name.trim())
-        .map(({ id: _id, ...med }) => med);
+      const prescribedMedicines = medications.filter((med) => med.name.trim());
+      const targetAppointmentId = String(appointmentId || appointment.appointment_id || '').trim();
+      const targetPatientId = String(appointment.patient_id || '').trim();
 
-      const resolvedAppointmentId = isUUID(appointmentId || '')
-        ? appointmentId
-        : isUUID(appointment.appointment_id || '')
-          ? appointment.appointment_id
-          : null;
-      const resolvedPatientId = isUUID(appointment.patient_id || '') ? appointment.patient_id : null;
-      const resolvedDoctorId = isUUID(appointment.doctor_id || '')
-        ? appointment.doctor_id
-        : DEFAULT_ACTIVE_DOCTOR_ID;
+      const vitalsSnapshot = {
+        temperature: temperature || null,
+        bp: bpSystolic && bpDiastolic ? `${bpSystolic}/${bpDiastolic}` : null,
+        pulse: pulse || null,
+        spo2: spo2 || null,
+        weight: weight || null,
+      };
 
-      const { data: consultData, error: consultError } = await supabase
-        .from('consultations')
-        .insert([
+      const rxResult = await dispatchDigitalPrescription(supabase, {
+        appointmentId: targetAppointmentId,
+        patientId: targetPatientId || null,
+        patientName,
+        doctorId: doctorIdentity.employeeId,
+        doctorName: doctorIdentity.doctorName,
+        department: doctorIdentity.department || doctorIdentity.specialization,
+        diagnosis: diagnosis.trim() || clinicalFindings.trim() || chiefComplaint.trim(),
+        clinicalNotes: [clinicalFindings.trim(), clinicalNotes.trim()].filter(Boolean).join('\n'),
+        doctorInstructions: doctorAdvice,
+        medications: prescribedMedicines.map((med) => ({
+          name: med.name.trim(),
+          dosage: med.dosage,
+          timing: med.frequency,
+          duration: med.duration,
+        })),
+        vitals: vitalsSnapshot,
+      });
+
+      if (!rxResult.ok) {
+        throw new Error(rxResult.error || 'Failed to write prescription to the patient app.');
+      }
+
+      try {
+        await supabase.from('consultations').insert([
           {
-            appointment_id: resolvedAppointmentId,
-            patient_id: resolvedPatientId,
+            appointment_id: targetAppointmentId || null,
+            patient_id: targetPatientId || null,
             patient_name: patientName,
-            doctor_id: resolvedDoctorId,
-            doctor_name: activeDoctorName,
+            doctor_id: doctorIdentity.employeeId,
+            doctor_name: doctorIdentity.doctorName,
             chief_complaint: chiefComplaint || '',
             clinical_notes: clinicalNotes || '',
             diagnosis: diagnosis || '',
@@ -143,78 +160,23 @@ export default function ConsultationWorkspaceClient({
             status: 'COMPLETED',
             created_at: new Date().toISOString(),
           },
-        ])
-        .select()
-        .maybeSingle();
-
-      if (consultError) {
-        console.warn('Consultation insert note:', consultError.message);
-      }
-
-      const createdConsultationId = consultData?.id ? String(consultData.id) : null;
-
-      if (createdConsultationId) {
-        const tempValue = temperature ? parseFloat(temperature) : null;
-        const bpSysValue = bpSystolic ? parseInt(bpSystolic, 10) : null;
-        const bpDiaValue = bpDiastolic ? parseInt(bpDiastolic, 10) : null;
-        const pulseValue = pulse ? parseInt(pulse, 10) : null;
-        const spo2Value = spo2 ? parseInt(spo2, 10) : null;
-        const weightValue = weight ? parseFloat(weight) : null;
-
-        const { error: vitalsError } = await supabase.from('vitals').insert([
-          {
-            consultation_id: createdConsultationId,
-            patient_id: resolvedPatientId,
-            temp: tempValue,
-            temperature: tempValue,
-            bp_sys: bpSysValue,
-            bp_systolic: bpSysValue,
-            bp_dia: bpDiaValue,
-            bp_diastolic: bpDiaValue,
-            pulse: pulseValue,
-            pulse_bpm: pulseValue,
-            spo2: spo2Value,
-            spo2_percent: spo2Value,
-            weight: weightValue,
-          },
         ]);
-
-        if (vitalsError) {
-          console.warn('Vitals insert note:', vitalsError.message);
-        }
-      }
-
-      if (prescribedMedicines.length > 0) {
-        const { error: prescError } = await supabase.from('prescriptions').insert([
-          {
-            consultation_id: createdConsultationId,
-            appointment_id: resolvedAppointmentId,
-            patient_id: resolvedPatientId,
-            patient_name: patientName,
-            doctor_id: resolvedDoctorId,
-            doctor_name: activeDoctorName,
-            medications: prescribedMedicines,
-            instructions: doctorAdvice || '',
-            created_at: new Date().toISOString(),
-          },
-        ]);
-
-        if (prescError) {
-          console.warn('Prescription insert note:', prescError.message);
-        }
+      } catch (consultErr: unknown) {
+        console.warn('Consultation insert note:', consultErr);
       }
 
       const appointmentUpdated = await completeAppointmentAfterConsultation({
-        appointmentId: resolvedAppointmentId,
-        patientId: resolvedPatientId,
+        appointmentId: targetAppointmentId || null,
+        patientId: targetPatientId || null,
         patientName,
         tokenNumber: appointment.token_number ?? null,
+        status: 'completed',
       });
 
       if (!appointmentUpdated) {
         console.warn(
           'Appointment status update note: no matching row updated for',
-          resolvedAppointmentId ?? patientName,
+          targetAppointmentId || patientName,
         );
       }
 

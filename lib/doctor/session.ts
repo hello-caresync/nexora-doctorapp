@@ -132,6 +132,7 @@ export function clearDoctorSession(): void {
 
   localStorage.removeItem(SESSION_KEY);
   sessionStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem('curasync_cached_doctor_queue');
   dispatchSessionChanged(null);
 }
 

@@ -43,6 +43,9 @@ interface ActiveTokenRecord {
 }
 
 import { formatINR } from '@/lib/utils/currency';
+import { readStoredPatientIdentity } from '@/lib/patient/active-patient-node';
+import { readPatientPortalSession } from '@/lib/patient/portal-session';
+import { CACHE_KEYS, readLocalJson, writeLocalJson } from '@/lib/persistence/local-cache';
 
 function billStatusLabel(status: ConsultationBill['status']): string {
   if (status === 'paid') return 'Paid';
@@ -57,15 +60,54 @@ function billStatusClass(status: ConsultationBill['status']): string {
   return 'bg-rose-50 text-rose-800 border-rose-200';
 }
 
+function readCachedPatientAppointments(): ActiveTokenRecord[] {
+  const primary = readLocalJson<ActiveTokenRecord[]>(CACHE_KEYS.patientAppointments);
+  if (Array.isArray(primary) && primary.length > 0) return primary;
+  const alt = readLocalJson<ActiveTokenRecord[]>(CACHE_KEYS.patientAppointmentsAlt);
+  return Array.isArray(alt) ? alt : [];
+}
+
 export default function PatientDashboard() {
   const router = useRouter();
 
-  const [activeToken, setActiveToken] = useState<ActiveTokenRecord | null>(null);
-  const [patientName, setPatientName] = useState<string>('Aishwarya D S');
-  const [patientId, setPatientId] = useState<string>(DEFAULT_PATIENT_ID);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [activeToken, setActiveToken] = useState<ActiveTokenRecord | null>(() => readCachedPatientAppointments()[0] ?? null);
+  const [patientName, setPatientName] = useState<string>(() => {
+    return readPatientPortalSession()?.patient_name || readStoredPatientIdentity().patientName || 'Aishwarya D S';
+  });
+  const [patientId, setPatientId] = useState<string>(() => {
+    return readStoredPatientIdentity().activePatientId || DEFAULT_PATIENT_ID;
+  });
+  const [loading, setLoading] = useState<boolean>(() => !readCachedPatientAppointments()[0]);
   const [bills, setBills] = useState<ConsultationBill[]>([]);
   const [billsLoading, setBillsLoading] = useState(true);
+  const [latestPrescription, setLatestPrescription] = useState<{
+    id: string;
+    doctor_name: string;
+    diagnosis: string;
+    created_at: string;
+  } | null>(null);
+
+  const fetchLatestPrescription = useCallback(async (pid: string, name?: string) => {
+    const filters = [`patient_id.eq.${pid}`];
+    if (name) filters.push(`patient_name.ilike.%${name}%`);
+    const { data } = await supabase
+      .from('prescriptions')
+      .select('id, doctor_name, diagnosis, created_at')
+      .or(filters.join(','))
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const row = data?.[0] as Record<string, unknown> | undefined;
+    if (!row) {
+      setLatestPrescription(null);
+      return;
+    }
+    setLatestPrescription({
+      id: String(row.id ?? ''),
+      doctor_name: String(row.doctor_name ?? 'Your doctor'),
+      diagnosis: String(row.diagnosis ?? 'Digital prescription issued'),
+      created_at: String(row.created_at ?? ''),
+    });
+  }, []);
 
   const fetchBills = useCallback(async (pid: string) => {
     setBillsLoading(true);
@@ -110,6 +152,8 @@ export default function PatientDashboard() {
           ...data[0],
           hospital_name: 'Regal Hospital',
         };
+        writeLocalJson(CACHE_KEYS.patientAppointments, data);
+        writeLocalJson(CACHE_KEYS.patientAppointmentsAlt, data);
       }
 
       if (!latestAppointment) {
@@ -142,15 +186,20 @@ export default function PatientDashboard() {
       console.warn('Dashboard DB load fallback active');
     } finally {
       setActiveToken(latestAppointment);
+      if (latestAppointment) {
+        writeLocalJson(CACHE_KEYS.patientAppointments, [latestAppointment]);
+        writeLocalJson(CACHE_KEYS.patientAppointmentsAlt, [latestAppointment]);
+      }
       const resolvedPatientId =
         latestAppointment?.patient_id ||
         (typeof window !== 'undefined' ? localStorage.getItem('patient_id') : null) ||
         DEFAULT_PATIENT_ID;
       setPatientId(resolvedPatientId);
       void fetchBills(resolvedPatientId);
+      void fetchLatestPrescription(resolvedPatientId, latestAppointment?.patient_name || patientName);
       setLoading(false);
     }
-  }, [fetchBills]);
+  }, [fetchBills, fetchLatestPrescription, patientName]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -180,6 +229,20 @@ export default function PatientDashboard() {
         { event: '*', schema: 'public', table: 'patient_appointments' },
         () => {
           void fetchActiveToken();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'appointments' },
+        () => {
+          void fetchActiveToken();
+        },
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'prescriptions' },
+        () => {
+          void fetchLatestPrescription(patientId, patientName);
         },
       )
       .subscribe();
@@ -253,6 +316,22 @@ export default function PatientDashboard() {
           </p>
         </div>
       </div>
+
+      {latestPrescription && (
+        <button
+          type="button"
+          onClick={() => router.push('/patient/prescriptions')}
+          className="w-full rounded-3xl border border-emerald-200 bg-emerald-50/80 p-5 text-left shadow-sm"
+        >
+          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800">
+            New digital prescription
+          </span>
+          <p className="mt-1 text-sm font-black text-[#0E2924]">
+            {latestPrescription.doctor_name} issued your prescription
+          </p>
+          <p className="mt-0.5 text-xs font-bold text-[#227B6B]">{latestPrescription.diagnosis}</p>
+        </button>
+      )}
 
       <div className="space-y-3">
         <h2 className="text-xs font-black uppercase tracking-wider text-[#227B6B] flex items-center gap-2">

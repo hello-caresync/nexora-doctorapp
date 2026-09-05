@@ -1,5 +1,9 @@
 import { createClient } from '@/lib/supabase/client';
 import { DEFAULT_ACTIVE_DOCTOR_ID, DEFAULT_PATIENT_ID } from '@/lib/doctor/command-center/supabase-service';
+import { appointmentBelongsToDoctor, getDoctorSession } from '@/lib/doctor/session';
+import { callNextInterleavedPatient } from '@/lib/queue/call-next';
+import { inferQueueType } from '@/lib/queue/queue-mapper';
+import { dedupeEncounterList } from '@/lib/queue/dedupe-encounters';
 
 export type AppointmentQueueStatus = 'WAITING' | 'IN_CONSULTATION' | 'COMPLETED' | string;
 
@@ -24,6 +28,9 @@ export interface LiveAppointmentRecord {
   predicted_wait_min?: number;
   ml_duration_min?: number;
   created_at?: string;
+  queue_type?: 'appointment' | 'walk_in';
+  check_in_status?: string;
+  triage_priority?: number;
 }
 
 function calcAge(dob?: string): number | undefined {
@@ -40,7 +47,8 @@ export function isWaitingStatus(status: string): boolean {
     s === 'BOOKED' ||
     s === 'CONFIRMED' ||
     s === 'PENDING' ||
-    s === 'SCHEDULED'
+    s === 'SCHEDULED' ||
+    s === 'ACTIVE'
   );
 }
 
@@ -114,7 +122,7 @@ async function enrichAppointmentRows(
 
     return {
       id: String(row.appointment_id ?? row.id ?? ''),
-      doctor_id: String(row.doctor_id ?? ''),
+      doctor_id: String(row.doctor_id ?? row.doctor_code ?? row.doctor_employee_id ?? ''),
       patient_id: patientId || undefined,
       patient_name: String(row.patient_name ?? profile?.full_name ?? 'Patient'),
       doctor_name: row.doctor_name ? String(row.doctor_name) : undefined,
@@ -139,6 +147,9 @@ async function enrichAppointmentRows(
       ),
       ml_duration_min: Number(row.ml_duration_min ?? row.estimated_duration ?? 15),
       created_at: row.created_at ? String(row.created_at) : undefined,
+      queue_type: inferQueueType(row),
+      check_in_status: row.check_in_status ? String(row.check_in_status) : undefined,
+      triage_priority: row.triage_priority == null ? undefined : Number(row.triage_priority),
     };
   });
 }
@@ -157,7 +168,23 @@ export async function fetchLiveAppointments(
     throw error;
   }
 
-  return enrichAppointmentRows((data ?? []) as Record<string, unknown>[]);
+  const rows = await enrichAppointmentRows((data ?? []) as Record<string, unknown>[]);
+  const session = getDoctorSession();
+  const scoped = session
+    ? rows.filter((row) =>
+        appointmentBelongsToDoctor(
+          {
+            ...row,
+            doctor_id: row.doctor_id,
+            doctor_code: row.doctor_id,
+            doctor_name: row.doctor_name,
+          },
+          session,
+        ),
+      )
+    : rows;
+
+  return dedupeEncounterList(scoped);
 }
 
 /** Preserve queue_status values exactly for patient_appointments cross-app sync. */
@@ -229,25 +256,37 @@ export async function callNextPatientInQueue(
   appointments: LiveAppointmentRecord[],
   activePatient: LiveAppointmentRecord | null,
 ): Promise<LiveAppointmentRecord | null> {
+  const supabase = createClient();
+  const session = getDoctorSession();
+
+  if (activePatient && isInConsultationStatus(activePatient.status)) {
+    await updateAppointmentRecord(activePatient.id, { status: 'COMPLETED', check_in_status: 'completed' });
+  }
+
+  const result = await callNextInterleavedPatient(supabase, {
+    doctorId: session?.doctorId || session?.employeeId,
+  });
+
+  if (result.nextPatient) {
+    const matched = appointments.find((item) => item.id === result.nextPatient?.id);
+    return matched
+      ? { ...matched, status: 'IN_CONSULTATION' }
+      : {
+          id: result.nextPatient.id,
+          doctor_id: result.nextPatient.doctor_id,
+          patient_id: result.nextPatient.patient_id,
+          patient_name: result.nextPatient.patient_name,
+          status: 'IN_CONSULTATION',
+          queue_type: result.nextPatient.queue_type,
+          time_slot: result.nextPatient.scheduled_time,
+        };
+  }
+
   const waitingQueue = appointments.filter((a) => isWaitingStatus(a.status));
-
-  if (waitingQueue.length === 0) {
-    return null;
-  }
-
-  let nextPatient: LiveAppointmentRecord;
-
-  if (activePatient && isWaitingStatus(activePatient.status)) {
-    nextPatient = activePatient;
-  } else {
-    if (activePatient && isInConsultationStatus(activePatient.status)) {
-      await updateAppointmentRecord(activePatient.id, { status: 'COMPLETED' });
-    }
-    nextPatient = waitingQueue[0];
-  }
-
-  await updateAppointmentRecord(nextPatient.id, { status: 'IN_CONSULTATION' });
-  return nextPatient;
+  if (waitingQueue.length === 0) return null;
+  const fallback = waitingQueue[0];
+  await updateAppointmentRecord(fallback.id, { status: 'IN_CONSULTATION', check_in_status: 'in_consultation' });
+  return fallback;
 }
 
 /** Emergency bypass: jump first waiting patient directly into consultation. */

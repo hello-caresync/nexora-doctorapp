@@ -1,5 +1,5 @@
-import { RecordsWorkspace } from '@/components/patient-v0/RecordsWorkspace';
+import { redirect } from 'next/navigation';
 
 export default function PatientRecordsPage() {
-  return <RecordsWorkspace />;
+  redirect('/patient/prescriptions');
 }

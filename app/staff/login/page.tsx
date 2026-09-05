@@ -20,15 +20,14 @@ import { recordRealStaffLogin, type AuthenticatedUserPayload } from '@/lib/recor
 import {
   getStaffPortalSession,
   persistStaffPortalSession,
-  resolveStaffDepartmentRoute,
   type StaffPortalSession,
 } from '@/lib/auth/ecosystem-sessions';
-import { clearStaleAuthArtifacts } from '@/lib/auth/active-session';
+import { clearStaleAuthArtifacts, persistActiveSession } from '@/lib/auth/active-session';
 import {
   authenticatePortalCredential,
   loadHospitalOptionsForLogin,
 } from '@/lib/auth/staff-credential-auth';
-import { getDoctorSession, saveDoctorSession } from '@/lib/doctor/session';
+import { saveDoctorSession } from '@/lib/doctor/session';
 
 type HospitalOption = {
   id: string;
@@ -53,21 +52,15 @@ function StaffDoctorLoginForm() {
   useEffect(() => {
     clearStaleAuthArtifacts();
 
-    const doctorSession = getDoctorSession();
-    if (doctorSession?.doctorId) {
-      router.replace('/doctor/workspace');
-      return;
-    }
-
     const activeSession = getStaffPortalSession();
-    if (activeSession && activeSession.staff_type !== 'Admin') {
-      const destination = resolveStaffDepartmentRoute(activeSession.staff_type);
+    const operationalRoles = ['Nurse', 'Receptionist', 'Pharmacist', 'Staff'];
+    if (activeSession && operationalRoles.includes(activeSession.staff_type)) {
       const safeRedirect =
         redirectUrl &&
-        redirectUrl !== '/staff/login' &&
-        !redirectUrl.startsWith('/staff/login')
+        redirectUrl.startsWith('/dashboard') &&
+        redirectUrl !== '/staff/login'
           ? redirectUrl
-          : destination;
+          : '/dashboard';
       router.replace(safeRedirect);
       return;
     }
@@ -154,12 +147,20 @@ function StaffDoctorLoginForm() {
         portal_access: '/dashboard',
       };
 
+      persistActiveSession({
+        id: session.id,
+        hospital_id: session.hospital_id,
+        hospital_name: session.hospital_name,
+        full_name: session.full_name,
+        staff_type: session.staff_type,
+        department: session.department,
+        email: session.email,
+        portal_access: '/dashboard',
+      });
       persistStaffPortalSession(session);
       document.cookie = `curasync_session_role=${encodeURIComponent(user.staff_type)}; path=/; max-age=86400; SameSite=Lax`;
 
-      const destination =
-        redirectUrl && redirectUrl.startsWith('/dashboard') ? redirectUrl : '/dashboard';
-      router.push(destination);
+      router.push('/dashboard');
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Authentication error.');
     } finally {
@@ -167,7 +168,7 @@ function StaffDoctorLoginForm() {
     }
   };
 
-  const selectedHospital = hospitals.find((hospital) => hospital.id === selectedHospitalId);
+  const selectedHospital = hospitals.find((hospital: HospitalOption) => hospital.id === selectedHospitalId);
 
   if (!isReady) {
     return (

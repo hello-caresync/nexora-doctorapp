@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { CACHE_KEYS, readLocalJson, writeLocalJson } from '@/lib/persistence/local-cache';
 import {
   Calendar,
   Clock,
@@ -36,8 +37,14 @@ interface AppointmentRecord {
 
 export default function MyAppointmentsPage() {
   const router = useRouter();
-  const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [appointments, setAppointments] = useState<AppointmentRecord[]>(() => {
+    const cached = readLocalJson<AppointmentRecord[]>(CACHE_KEYS.patientAppointments);
+    return Array.isArray(cached) ? cached : [];
+  });
+  const [loading, setLoading] = useState<boolean>(() => {
+    const cached = readLocalJson<AppointmentRecord[]>(CACHE_KEYS.patientAppointments);
+    return !(Array.isArray(cached) && cached.length > 0);
+  });
 
   const fetchAppointments = useCallback(async () => {
     setLoading(true);
@@ -78,7 +85,8 @@ export default function MyAppointmentsPage() {
       }
       // Save unified list back to localStorage
       if (combinedList.length > 0) {
-        localStorage.setItem('curasync_appointments', JSON.stringify(combinedList));
+        writeLocalJson(CACHE_KEYS.patientAppointments, combinedList);
+        writeLocalJson(CACHE_KEYS.patientAppointmentsAlt, combinedList);
       }
     }
 

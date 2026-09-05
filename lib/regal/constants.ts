@@ -4,6 +4,8 @@
 
 export const REGAL_HOSPITAL_ID = '11111111-1111-1111-1111-111111111111';
 export const REGAL_FACILITY_CODE = 'RH-BLR-01';
+/** Staff / patient session tenant code used by Hospital OS dashboard filters. */
+export const HOSPITAL_TENANT_ID = 'HOSP-01';
 export const REGAL_HOSPITAL_NAME = 'Regal Hospital';
 export const DEFAULT_VENDOR_ID = '11111111-1111-1111-1111-111111111111';
 

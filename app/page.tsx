@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Crown,
   ShieldCheck,
@@ -32,8 +32,6 @@ interface PortalOption {
 }
 
 export default function BalancedEcosystemGateway() {
-  const router = useRouter();
-
   const portals: PortalOption[] = [
     {
       title: 'Super Admin',
@@ -168,9 +166,9 @@ export default function BalancedEcosystemGateway() {
           {portals.map((portal) => {
             const Icon = portal.icon;
             return (
-              <div
+              <Link
                 key={portal.title}
-                onClick={() => router.push(portal.href)}
+                href={portal.href}
                 className={`group flex cursor-pointer flex-col justify-between rounded-2xl border border-slate-200/90 bg-white/95 p-5 shadow-sm backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 hover:shadow-xl ${portal.colorScheme.borderHover}`}
               >
                 <div className="space-y-3">
@@ -205,7 +203,7 @@ export default function BalancedEcosystemGateway() {
                   <span>Access Workspace</span>
                   <ArrowRight className="h-3.5 w-3.5 transform transition-transform group-hover:translate-x-1" />
                 </div>
-              </div>
+              </Link>
             );
           })}
         </div>
