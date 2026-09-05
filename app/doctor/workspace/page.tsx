@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 
 import { completeConsultationWithInvoice } from '@/lib/billing/post-consultation-invoice';
+import { postConsultationPharmacyBridge } from '@/lib/hospital/records-pharmacy';
 import {
   appointmentBelongsToDoctor,
   clearDoctorSession,
@@ -197,6 +198,19 @@ export default function DoctorWorkspacePage() {
         throw new Error(result.error || 'Error processing consultation and invoice.');
       }
 
+      void postConsultationPharmacyBridge(supabase, {
+        hospitalId: doctorSession?.hospitalCode || activeConsultation.hospital_id || HOSPITAL_TENANT_ID,
+        appointmentId: activeConsultation.appointment_id || activeConsultation.id,
+        uhid: activeConsultation.uhid || `UHID-${activeConsultation.id.slice(0, 6)}`,
+        patientName: activeConsultation.patient_name,
+        doctorId: doctorSession?.doctorId || activeConsultation.doctor_id,
+        doctorName: doctorSession?.doctorName || doctorSession?.fullName || activeConsultation.doctor_name,
+        medicines: validMedicines.map((med) => ({
+          name: med.name,
+          qty: med.qty,
+        })),
+      });
+
       toast.success(`Consultation completed! Bill of ₹${result.totalAmount} routed to Hospital Billing Desk.`);
       closeConsultation();
       await fetchDoctorAppointments();
@@ -224,9 +238,9 @@ export default function DoctorWorkspacePage() {
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans">
       <header className="h-16 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-6 flex items-center justify-between sticky top-0 z-30">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-black border border-zinc-800 flex items-center justify-center p-1 shadow-sm shrink-0 overflow-hidden aspect-square">
+          <div className="w-10 h-10 flex items-center justify-center shrink-0 aspect-square overflow-hidden">
             <img
-              src="/regal-dark-logo.png"
+              src="/regal-logo-transparent.png"
               alt="Regal Hospital"
               className="w-full h-full object-contain"
             />
@@ -236,7 +250,7 @@ export default function DoctorWorkspacePage() {
             <h1 className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
               Doctor Clinical Workspace
             </h1>
-            <p className="text-[11px] text-gray-500">
+            <p className="text-[11px] text-gray-500 dark:text-zinc-400">
               OPD Consultation &amp; Pharmacy Routing · Node HOSP-01
             </p>
           </div>

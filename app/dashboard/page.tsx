@@ -21,7 +21,6 @@ import {
   Menu,
   PackageCheck,
   Phone,
-  Pill,
   Plus,
   QrCode,
   RefreshCw,
@@ -52,6 +51,7 @@ import {
   mapBillingInvoiceRow,
   type InvoiceMedicineLine,
 } from '@/lib/billing/post-consultation-invoice';
+import { RecordsPharmacyCommandCenter } from '@/components/hospital/RecordsPharmacyCommandCenter';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -1982,12 +1982,12 @@ export default function HospitalMasterDashboard() {
   const sidebar = (
     <>
       <div className="p-5 border-b border-slate-800/80">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-xl bg-black border border-slate-800 flex items-center justify-center p-1.5 shadow-md shrink-0 overflow-hidden">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 flex items-center justify-center shrink-0 aspect-square overflow-hidden">
             <img
-              src="/regal-dark-logo.png"
+              src="/regal-logo-transparent.png"
               alt="Regal Hospital Logo"
-              className="w-full h-full object-contain aspect-square"
+              className="w-full h-full object-contain"
             />
           </div>
           <div>
@@ -2492,41 +2492,11 @@ export default function HospitalMasterDashboard() {
           )}
 
           {activeTab === 'pharmacy' && (
-            <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">Records &amp; Pharmacy Formulary</h3>
-                  <p className="text-xs text-slate-500">Live inventory for {hospitalInfo.name}. No placeholder SKUs.</p>
-                </div>
-                <button type="button" onClick={() => setActiveModal('pharmacy')} className="px-3.5 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-1.5">
-                  <Plus className="w-3.5 h-3.5" /> Add Formulary Item
-                </button>
-              </div>
-              {pharmacyItems.length === 0 ? (
-                <EmptyState icon={Pill} title="Formulary Empty" body={`No medicines stocked for ${hospitalInfo.name}. Add the first formulary item.`} actionLabel="Add Formulary Item" onAction={() => setActiveModal('pharmacy')} />
-              ) : (
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase">
-                    <tr>
-                      <th className="py-3 px-4">Item</th>
-                      <th className="py-3 px-4">Category</th>
-                      <th className="py-3 px-4">Stock</th>
-                      <th className="py-3 px-4 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {pharmacyItems.map((med) => (
-                      <tr key={med.id || formularyMatchKey(med)}>
-                        <td className="py-3.5 px-4 font-bold">{med.item_name}</td>
-                        <td className="py-3.5 px-4">{med.category}</td>
-                        <td className="py-3.5 px-4 font-mono">{med.stock}</td>
-                        <td className="py-3.5 px-4 text-right">{med.status}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
+            <RecordsPharmacyCommandCenter
+              hospitalId={hospitalInfo.id || HOSPITAL_TENANT_ID}
+              hospitalName={hospitalInfo.name || 'Regal Hospital'}
+              onInventoryChanged={() => void loadPharmacyData()}
+            />
           )}
 
           {activeTab === 'billing' && (

@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import { createPendingConsultationInvoice } from '@/lib/billing/post-consultation-invoice';
 import { generatePostConsultationBill } from '@/lib/hospital/operations/consultation-billing-sync';
+import { postConsultationPharmacyBridge } from '@/lib/hospital/records-pharmacy';
 
 export type DispatchMedication = {
   name: string;
@@ -278,6 +279,20 @@ export async function dispatchDigitalPrescription(
             prescriptions: input.medications.map((med) => ({ medicine_name: med.name })),
           })
         : Promise.resolve(),
+      postConsultationPharmacyBridge(supabase, {
+        hospitalId: input.hospitalId,
+        appointmentId: input.appointmentId,
+        uhid: input.uhid || input.patientId || input.patientName,
+        patientName: input.patientName,
+        doctorId: input.doctorId,
+        doctorName: input.doctorName,
+        medicines: input.medications.map((med) => ({
+          name: med.name,
+          qty: med.qty,
+          dosage: med.dosage,
+          frequency: med.timing,
+        })),
+      }),
     ]);
 
     return { ok: true, prescriptionId };
