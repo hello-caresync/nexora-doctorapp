@@ -93,3 +93,21 @@ export function clearActiveSession(): void {
   document.cookie = `auth-token=; ${attrs}`;
   document.cookie = `sb-access-token=; ${attrs}`;
 }
+
+/** Drop leftover hospital Admin/staff tokens so tenant hops always show the login form. Does not touch Super Admin. */
+export function clearHospitalOsSessionTokens(): void {
+  if (typeof window === 'undefined') return;
+
+  localStorage.removeItem(CURASYNC_ACTIVE_SESSION_KEY);
+  localStorage.removeItem('curasync_admin_session');
+  localStorage.removeItem('curasync_staff_session');
+  localStorage.removeItem('curasync_admin_role');
+  localStorage.removeItem('admin_authenticated');
+  removeLocalJson(CACHE_KEYS.hospitalInfo);
+
+  const attrs = 'path=/; max-age=0; SameSite=Lax';
+  document.cookie = `curasync_admin_session=; ${attrs}`;
+  document.cookie = `curasync_active_session=; ${attrs}`;
+  document.cookie = `curasync_staff_session=; ${attrs}`;
+  document.cookie = `curasync_session=; ${attrs}`;
+}

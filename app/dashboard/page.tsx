@@ -734,10 +734,7 @@ export default function HospitalMasterDashboard() {
   const [activeTab, setActiveTab] = useState<NavModule>('dashboard');
   const [currentUserRole, setCurrentUserRole] = useState(() => readHospitalAppSession()?.staff_type || 'Staff');
   const [isLoading, setIsLoading] = useState(false);
-  const [isVerifying, setIsVerifying] = useState(() => {
-    const session = readHospitalAppSession();
-    return !session || !isHospitalAppRole(session.staff_type);
-  });
+  const [isVerifying, setIsVerifying] = useState(true);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [activeModal, setActiveModal] = useState<ModalKind>(null);
 
@@ -1067,7 +1064,7 @@ export default function HospitalMasterDashboard() {
     setCurrentUserRole(staffType);
 
     if (!hospitalId || !isHospitalAppRole(staffType)) {
-      router.replace('/admin/login?redirect=/dashboard');
+      router.replace('/admin/login?tenant=HOSP-01');
       return;
     }
 
@@ -1984,21 +1981,26 @@ export default function HospitalMasterDashboard() {
 
   const sidebar = (
     <>
-      <div className="p-6 border-b border-slate-800/80">
-        <div className="bg-white rounded-xl p-2.5 shadow-sm flex items-center justify-center border border-slate-200/20">
-          <img
-            src="/regal-logo.png"
-            alt="Regal Hospital"
-            className="h-10 w-auto object-contain"
-          />
-        </div>
-        <div className="mt-3 flex items-center justify-between">
-          <span className="text-[10px] font-mono tracking-wider font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-            Node: {hospitalInfo.id || HOSPITAL_TENANT_ID}
-          </span>
-          <span className="text-[10px] text-slate-400 font-medium">
-            Bengaluru Central
-          </span>
+      <div className="p-5 border-b border-slate-800/80">
+        <div className="flex items-center gap-3.5">
+          <div className="w-12 h-12 rounded-xl bg-black border border-slate-800 flex items-center justify-center p-1.5 shadow-md shrink-0 overflow-hidden">
+            <img
+              src="/regal-dark-logo.png"
+              alt="Regal Hospital Logo"
+              className="w-full h-full object-contain aspect-square"
+            />
+          </div>
+          <div>
+            <h2 className="text-sm font-extrabold text-white leading-tight tracking-wide">
+              {hospitalInfo.name || 'Regal Hospital'}
+            </h2>
+            <div className="mt-1 flex items-center gap-1.5">
+              <span className="text-[10px] font-mono font-bold uppercase px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                {hospitalInfo.id || HOSPITAL_TENANT_ID}
+              </span>
+              <span className="text-[10px] text-slate-400">Bengaluru</span>
+            </div>
+          </div>
         </div>
       </div>
       <div className="p-5 overflow-y-auto flex-1">

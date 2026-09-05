@@ -16,13 +16,12 @@ import {
 } from 'lucide-react';
 import { recordRealStaffLogin } from '@/lib/recordStaffLogin';
 import {
+  clearHospitalOsSessionTokens,
   clearStaleAuthArtifacts,
-  CURASYNC_ACTIVE_SESSION_KEY,
-  parseActiveSession,
   persistActiveSession,
   type ActiveStaffSession,
 } from '@/lib/auth/active-session';
-import { isHospitalSetupCompleted, resolveAdminPostLoginRoute } from '@/lib/auth/admin-setup';
+import { isHospitalSetupCompleted } from '@/lib/auth/admin-setup';
 import { authenticateHospitalAdmin } from '@/lib/auth/hospital-admin-auth';
 import { loadHospitalOptionsForLogin } from '@/lib/auth/staff-credential-auth';
 
@@ -49,13 +48,8 @@ function HospitalAdminLoginForm() {
 
   useEffect(() => {
     clearStaleAuthArtifacts();
-
-    const activeSession = parseActiveSession(localStorage.getItem(CURASYNC_ACTIVE_SESSION_KEY));
-    if (activeSession?.staff_type === 'Admin') {
-      void resolveAdminPostLoginRoute(activeSession.hospital_id).then((route) => {
-        router.replace(redirectUrl || route);
-      });
-      return;
+    if (searchParams.get('tenant')) {
+      clearHospitalOsSessionTokens();
     }
 
     void loadHospitalOptionsForLogin().then((options) => {
@@ -67,7 +61,7 @@ function HospitalAdminLoginForm() {
       });
       setIsReady(true);
     });
-  }, [router, redirectUrl, tenantId]);
+  }, [searchParams, tenantId]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();

@@ -1,11 +1,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Building2, Crown, Hospital, Users } from 'lucide-react';
+import { Crown, Hospital, Users } from 'lucide-react';
 
+import { clearHospitalOsSessionTokens } from '@/lib/auth/active-session';
 import { fetchHospitalStaffCounts, type HospitalStaffRoleCount } from '@/lib/hospital/hospital-staff-roster';
 import { supabase } from '@/lib/supabaseClient';
+
+const HOSPITAL_ADMIN_LOGIN = '/admin/login?tenant=HOSP-01';
 
 export default function SuperAdminDashboardPage() {
   const router = useRouter();
@@ -35,10 +39,20 @@ export default function SuperAdminDashboardPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => router.push('/admin/login?tenant=HOSP-01')}
-          className="w-full text-left p-6 bg-white border border-purple-200 rounded-3xl shadow-sm text-slate-900 hover:border-purple-400 hover:shadow-md transition"
+        <div
+          role="link"
+          tabIndex={0}
+          onClick={() => {
+            clearHospitalOsSessionTokens();
+            router.push(HOSPITAL_ADMIN_LOGIN);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            clearHospitalOsSessionTokens();
+            router.push(HOSPITAL_ADMIN_LOGIN);
+          }}
+          className="w-full cursor-pointer text-left p-6 bg-white border border-purple-200 rounded-3xl shadow-sm text-slate-900 hover:border-purple-400 hover:shadow-md transition"
         >
           <div className="flex justify-between items-center mb-3">
             <span className="px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-purple-100 text-purple-800">
@@ -64,10 +78,17 @@ export default function SuperAdminDashboardPage() {
               <div className="text-[10px] font-bold text-emerald-500 uppercase mt-0.5">Staff</div>
             </div>
           </div>
-          <div className="mt-5 text-[11px] font-bold text-purple-700">
-            View Hospital Vault → Hospital Admin Login
-          </div>
-        </button>
+          <Link
+            href={HOSPITAL_ADMIN_LOGIN}
+            onClick={(event) => {
+              event.stopPropagation();
+              clearHospitalOsSessionTokens();
+            }}
+            className="mt-5 inline-block text-[11px] font-bold text-purple-700 hover:underline"
+          >
+            View Hospital Vault
+          </Link>
+        </div>
 
         <div className="grid gap-4 md:grid-cols-2">
           <button

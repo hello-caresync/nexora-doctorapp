@@ -222,31 +222,31 @@ export default function DoctorWorkspacePage() {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 font-sans">
-      <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between sticky top-0 z-30">
-        <div className="flex items-center gap-4">
-          <div className="bg-white p-1.5 rounded-lg border border-slate-200 shadow-xs flex items-center justify-center">
+      <header className="h-16 bg-white dark:bg-zinc-900 border-b border-gray-200 dark:border-zinc-800 px-6 flex items-center justify-between sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-black border border-zinc-800 flex items-center justify-center p-1 shadow-sm shrink-0 overflow-hidden aspect-square">
             <img
-              src="/regal-logo.png"
+              src="/regal-dark-logo.png"
               alt="Regal Hospital"
-              className="h-8 w-auto object-contain"
+              className="w-full h-full object-contain"
             />
           </div>
-          <div className="h-6 w-px bg-slate-200 hidden sm:block" />
+          <div className="h-6 w-px bg-gray-200 dark:bg-zinc-800 hidden sm:block" />
           <div>
-            <h1 className="text-sm font-bold text-slate-900 leading-tight">
+            <h1 className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
               Doctor Clinical Workspace
             </h1>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-gray-500">
               OPD Consultation &amp; Pharmacy Routing · Node HOSP-01
             </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
-            <div className="text-xs font-bold text-slate-900">
+            <div className="text-xs font-bold text-gray-900 dark:text-white">
               {doctorSession.fullName || doctorSession.doctorName || 'Dr. Suriraju V'}
             </div>
-            <div className="text-[10px] text-emerald-600 font-medium">
+            <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
               {doctorSession.department || 'Consultant Specialist'}
             </div>
           </div>

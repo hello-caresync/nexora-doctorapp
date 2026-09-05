@@ -83,11 +83,11 @@ export default function PatientLayout({ children }: { children: ReactNode }) {
         <header className="bg-white border-b border-gray-100 py-3 px-6 shadow-xs sticky top-0 z-40">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="bg-white p-1 rounded-lg border border-gray-200/80 shadow-xs flex items-center justify-center">
+              <div className="w-10 h-10 rounded-lg bg-black border border-zinc-800 flex items-center justify-center p-1 shadow-sm shrink-0 overflow-hidden aspect-square">
                 <img
-                  src="/regal-logo.png"
+                  src="/regal-dark-logo.png"
                   alt="Regal Hospital"
-                  className="h-9 w-auto object-contain"
+                  className="w-full h-full object-contain"
                 />
               </div>
               <span className="hidden sm:inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
