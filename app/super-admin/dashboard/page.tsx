@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Crown, Hospital, Users } from 'lucide-react';
+import { Building2, Crown, Hospital, Users } from 'lucide-react';
 
 import { clearHospitalOsSessionTokens } from '@/lib/auth/active-session';
 import { fetchHospitalStaffCounts, type HospitalStaffRoleCount } from '@/lib/hospital/hospital-staff-roster';
