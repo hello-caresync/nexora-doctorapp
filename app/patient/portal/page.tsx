@@ -31,15 +31,27 @@ export default function PatientPortalPage() {
     }
 
     let cancelled = false;
-    void fetchActiveHospitalDoctors(supabase, HOSPITAL_TENANT_ID).then((rows) => {
-      if (cancelled) return;
-      setDoctorList(rows);
-      setSelectedDoctor(rows[0] ?? null);
-      setIsLoadingDoctors(false);
-    });
+    const loadDoctors = () =>
+      fetchActiveHospitalDoctors(supabase, HOSPITAL_TENANT_ID).then((rows) => {
+        if (cancelled) return;
+        setDoctorList(rows);
+        setSelectedDoctor((prev) => rows.find((row) => row.id === prev?.id) ?? rows[0] ?? null);
+        setIsLoadingDoctors(false);
+      });
+
+    void loadDoctors();
+    const channel = supabase
+      ?.channel('patient_booking_doctors')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'hospital_staff', filter: `hospital_id=eq.${HOSPITAL_TENANT_ID}` },
+        () => void loadDoctors(),
+      )
+      .subscribe();
 
     return () => {
       cancelled = true;
+      if (channel) void supabase?.removeChannel(channel);
     };
   }, []);
 
@@ -144,6 +156,8 @@ export default function PatientPortalPage() {
           >
             {isLoadingDoctors ? (
               <option value="">Loading specialists…</option>
+            ) : doctorList.length === 0 ? (
+              <option value="">No active doctors published yet</option>
             ) : (
               doctorList.map((doc) => (
                 <option key={doc.id} value={doc.id}>

@@ -91,8 +91,11 @@ export async function fetchActiveHospitalDoctors(
     .eq('is_active', true)
     .order('full_name', { ascending: true });
 
-  if (error || !Array.isArray(data) || data.length === 0) {
-    return FALLBACK_HOSPITAL_DOCTORS;
+  if (error) {
+    return [];
+  }
+  if (!Array.isArray(data) || data.length === 0) {
+    return [];
   }
 
   return data.map((row) => mapDoctorStaffRecord(row as Record<string, unknown>)).filter((row) => row.full_name);
@@ -109,7 +112,7 @@ export async function fetchHospitalStaffCounts(
     .eq('is_active', true);
 
   if (error || !Array.isArray(data)) {
-    return { accounts: 45, doctors: 41, staff: 3, admins: 1 };
+    return { accounts: 0, doctors: 0, staff: 0, admins: 0 };
   }
 
   const roles = data.map((row) => String((row as { role?: string }).role ?? '').toLowerCase());

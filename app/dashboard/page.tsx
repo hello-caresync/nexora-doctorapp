@@ -25,7 +25,6 @@ import {
   QrCode,
   RefreshCw,
   Search,
-  ShieldCheck,
   Siren,
   Smartphone,
   Stethoscope,
@@ -52,6 +51,8 @@ import {
   type InvoiceMedicineLine,
 } from '@/lib/billing/post-consultation-invoice';
 import { RecordsPharmacyCommandCenter } from '@/components/hospital/RecordsPharmacyCommandCenter';
+import { DoctorsStaffCommandCenter } from '@/components/hospital/DoctorsStaffCommandCenter';
+import { mapHospitalStaffMember, toDashboardStaffRow } from '@/lib/hospital/staff-directory';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -838,7 +839,7 @@ export default function HospitalMasterDashboard() {
         emergencyRows,
         hospitalEmergencyRows,
       ] = await Promise.all([
-        selectScoped('hospital_staff_credentials', activeNode),
+        selectScoped('hospital_staff', activeNode),
         fetchNodeAppointments(activeNode),
         selectScoped('hospital_opd_queue', activeNode),
         selectScoped('patients', activeNode),
@@ -855,18 +856,10 @@ export default function HospitalMasterDashboard() {
         selectScoped('hospital_emergencies', activeNode),
       ]);
 
-      setStaffMembers(
-        (staffRows || []).map((row) => ({
-          id: String(row.id ?? ''),
-          full_name: String(row.full_name ?? ''),
-          staff_type: String(row.staff_type ?? ''),
-          department: String(row.department ?? ''),
-          email: String(row.email ?? ''),
-          temporary_passcode: String(row.temporary_passcode ?? ''),
-          portal_access: String(row.portal_access ?? ''),
-          status: String(row.status ?? 'Active'),
-        })),
+      const mappedStaff = (staffRows || []).map((row) =>
+        toDashboardStaffRow(mapHospitalStaffMember(row, activeNode)),
       );
+      setStaffMembers(mappedStaff);
 
       const liveAppointments = aptRows || [];
       const liveQueue = dedupeEncounterList(
@@ -933,16 +926,7 @@ export default function HospitalMasterDashboard() {
         hospitalInfo: nextHospitalInfo,
         opdQueue: liveQueue,
         patientRegistry: buildPatientDirectory(liveQueue, [...(patientRows || []), ...(hospitalPatientRows || [])]),
-        staffMembers: (staffRows || []).map((row) => ({
-          id: String(row.id ?? ''),
-          full_name: String(row.full_name ?? ''),
-          staff_type: String(row.staff_type ?? ''),
-          department: String(row.department ?? ''),
-          email: String(row.email ?? ''),
-          temporary_passcode: String(row.temporary_passcode ?? ''),
-          portal_access: String(row.portal_access ?? ''),
-          status: String(row.status ?? 'Active'),
-        })),
+        staffMembers: mappedStaff,
         pharmacyItems: dedupePharmacyItems(pharmacySource.map(mapPharmacyRow)),
         beds: (bedRows || []).map((row) => ({
           id: String(row.id ?? ''),
@@ -1178,7 +1162,7 @@ export default function HospitalMasterDashboard() {
         {
           event: '*',
           schema: 'public',
-          table: 'hospital_staff_credentials',
+          table: 'hospital_staff',
           filter: `hospital_id=eq.${activeNode}`,
         },
         reload,
@@ -2091,7 +2075,7 @@ export default function HospitalMasterDashboard() {
               Issue OPD Token
             </button>
             {canProvisionStaff && (
-              <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2">
+              <button type="button" onClick={() => setActiveTab('staff')} className="px-4 py-2 rounded-xl bg-cyan-700 hover:bg-cyan-800 text-white text-xs font-bold flex items-center gap-2">
                 <Plus className="w-4 h-4" />
                 Provision Staff
               </button>
@@ -2782,61 +2766,12 @@ export default function HospitalMasterDashboard() {
           )}
 
           {activeTab === 'staff' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-black text-slate-900">Hospital Staff Directory</h3>
-                  <p className="text-xs text-slate-500">Active roster for {hospitalInfo.name}.</p>
-                </div>
-                {canProvisionStaff && (
-                  <button type="button" onClick={() => router.push('/dashboard/staff-credentials')} className="px-4 py-2 rounded-xl bg-cyan-700 text-white text-xs font-bold flex items-center gap-2">
-                    <Plus className="w-4 h-4" />
-                    Add Staff Credential
-                  </button>
-                )}
-              </div>
-              {currentUserRole !== 'Admin' ? (
-                <div className="p-10 bg-white rounded-2xl border border-slate-200 text-center space-y-3">
-                  <div className="p-3 bg-cyan-50 text-cyan-700 rounded-full w-fit mx-auto border border-cyan-200">
-                    <ShieldCheck className="w-6 h-6" />
-                  </div>
-                  <h4 className="text-sm font-bold">Credential Keyring Restricted</h4>
-                  <p className="text-xs text-slate-500 max-w-md mx-auto">
-                    Logged in as {currentUserRole}. Staff provisioning and passcode keys are available only to Hospital Administrators.
-                  </p>
-                </div>
-              ) : staffMembers.length === 0 ? (
-                <EmptyState icon={HeartHandshake} title="No staff provisioned" body="Add the first clinician or support credential for this node." actionLabel="Add Staff Credential" onAction={() => router.push('/dashboard/staff-credentials')} />
-              ) : (
-                <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-[10px] font-black text-slate-500 uppercase">
-                      <tr>
-                        <th className="py-3 px-4">Staff Member &amp; ID</th>
-                        <th className="py-3 px-4">Department &amp; Role</th>
-                        <th className="py-3 px-4">Email</th>
-                        <th className="py-3 px-4">Passcode Key</th>
-                        <th className="py-3 px-4 text-right">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {staffMembers.map((member) => (
-                        <tr key={member.id}>
-                          <td className="py-3.5 px-4 font-bold">
-                            <span className="font-mono text-[10px] font-bold text-cyan-700 bg-cyan-50 px-1.5 py-0.5 rounded border border-cyan-200 mr-2">{member.id}</span>
-                            {member.full_name}
-                          </td>
-                          <td className="py-3.5 px-4">{member.department} ({member.staff_type})</td>
-                          <td className="py-3.5 px-4 font-mono">{member.email}</td>
-                          <td className="py-3.5 px-4 font-mono font-bold text-cyan-800">{member.temporary_passcode}</td>
-                          <td className="py-3.5 px-4 text-right">{member.status || 'Active'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+            <DoctorsStaffCommandCenter
+              hospitalId={hospitalInfo.id || HOSPITAL_TENANT_ID}
+              hospitalName={hospitalInfo.name || 'Regal Hospital'}
+              canManage={canProvisionStaff}
+              onRosterChanged={setStaffMembers}
+            />
           )}
 
           {activeTab === 'emergency' && (

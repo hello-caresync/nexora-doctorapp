@@ -392,8 +392,7 @@ export default function BookAppointmentPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setIsLoadingDoctors(true);
-    void fetchActiveHospitalDoctors(supabase, HOSPITAL_TENANT_ID).then((rows) => {
+    const applyRows = (rows: DoctorStaffRecord[]) => {
       if (cancelled) return;
       setDoctorList(rows);
       const directory = rows.map(toDirectoryItem);
@@ -421,11 +420,29 @@ export default function BookAppointmentPage() {
         setConsultationFee(formatConsultationFee(preselected.consultation_fee));
       } else if (preselected) {
         setSelectedDoctor(preselected);
+      } else {
+        setSelectedDoctor(null);
       }
       setIsLoadingDoctors(false);
-    });
+    };
+
+    setIsLoadingDoctors(true);
+    void fetchActiveHospitalDoctors(supabase, HOSPITAL_TENANT_ID).then(applyRows);
+
+    const channel = supabase
+      ?.channel('patient_book_doctors')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'hospital_staff', filter: `hospital_id=eq.${HOSPITAL_TENANT_ID}` },
+        () => {
+          void fetchActiveHospitalDoctors(supabase, HOSPITAL_TENANT_ID).then(applyRows);
+        },
+      )
+      .subscribe();
+
     return () => {
       cancelled = true;
+      if (channel) void supabase?.removeChannel(channel);
     };
   }, [searchParams]);
 
