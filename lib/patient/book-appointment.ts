@@ -141,7 +141,9 @@ export async function bookAppointmentWithDoctor(
     appointment_time: appointmentTime,
     slot_time: appointmentTime,
     time_slot: appointmentTime,
-    status: 'WAITING',
+    status: 'waiting',
+    billing_status: 'pending_checkout',
+    consultation_fee: Number(payload.consultation_fee ?? payload.fee ?? 500) || 500,
     token_number: tokenLabel,
     source: 'patient_app',
   };

@@ -1,10 +1,24 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Building2, Crown, Hospital, Users } from 'lucide-react';
 
+import { fetchHospitalStaffCounts, type HospitalStaffRoleCount } from '@/lib/hospital/hospital-staff-roster';
+import { supabase } from '@/lib/supabaseClient';
+
 export default function SuperAdminDashboardPage() {
   const router = useRouter();
+  const [tenantStats, setTenantStats] = useState<HospitalStaffRoleCount>({
+    accounts: 45,
+    doctors: 41,
+    staff: 3,
+    admins: 1,
+  });
+
+  useEffect(() => {
+    void fetchHospitalStaffCounts(supabase).then(setTenantStats);
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 p-6 font-sans text-slate-100 sm:p-10">
@@ -19,6 +33,33 @@ export default function SuperAdminDashboardPage() {
             Provision hospital nodes, create initial Hospital Admin credentials, and manage the
             multi-tenant clinical ecosystem.
           </p>
+        </div>
+
+        <div className="p-6 bg-white border border-purple-200 rounded-3xl shadow-sm text-slate-900">
+          <div className="flex justify-between items-center mb-3">
+            <span className="px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-purple-100 text-purple-800">
+              HOSP-01
+            </span>
+            <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-600">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Active
+            </span>
+          </div>
+          <h3 className="text-xl font-extrabold text-purple-950">Regal Hospital</h3>
+          <p className="text-xs text-gray-500 mb-6">Bengaluru, Karnataka</p>
+          <div className="grid grid-cols-3 gap-3 text-center">
+            <div className="p-4 rounded-2xl bg-gray-50 border border-gray-100">
+              <div className="text-2xl font-black text-gray-900">{tenantStats.accounts}</div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase mt-0.5">Accounts</div>
+            </div>
+            <div className="p-4 rounded-2xl bg-blue-50 border border-blue-100">
+              <div className="text-2xl font-black text-blue-600">{tenantStats.doctors}</div>
+              <div className="text-[10px] font-bold text-blue-500 uppercase mt-0.5">Doctors</div>
+            </div>
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100">
+              <div className="text-2xl font-black text-emerald-600">{tenantStats.staff}</div>
+              <div className="text-[10px] font-bold text-emerald-500 uppercase mt-0.5">Staff</div>
+            </div>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
