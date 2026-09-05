@@ -36,9 +36,10 @@ function HospitalAdminLoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectUrl = searchParams.get('redirect');
+  const tenantId = searchParams.get('tenant') || 'HOSP-01';
 
   const [hospitals, setHospitals] = useState<HospitalOption[]>([]);
-  const [selectedHospitalId, setSelectedHospitalId] = useState('HOSP-01');
+  const [selectedHospitalId, setSelectedHospitalId] = useState(tenantId);
   const [email, setEmail] = useState('');
   const [passcode, setPasscode] = useState('');
   const [showPasscode, setShowPasscode] = useState(false);
@@ -59,12 +60,14 @@ function HospitalAdminLoginForm() {
 
     void loadHospitalOptionsForLogin().then((options) => {
       setHospitals(options);
-      setSelectedHospitalId((prev) =>
-        options.some((o) => o.id === prev) ? prev : options[0]?.id ?? 'HOSP-01',
-      );
+      setSelectedHospitalId((prev) => {
+        if (options.some((o) => o.id === tenantId)) return tenantId;
+        if (options.some((o) => o.id === prev)) return prev;
+        return options[0]?.id ?? 'HOSP-01';
+      });
       setIsReady(true);
     });
-  }, [router, redirectUrl]);
+  }, [router, redirectUrl, tenantId]);
 
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -107,6 +110,8 @@ function HospitalAdminLoginForm() {
       };
 
       persistActiveSession(session);
+      localStorage.setItem('curasync_admin_role', 'admin');
+      localStorage.setItem('admin_authenticated', 'true');
 
       const setupCompleted = await isHospitalSetupCompleted(user.hospital_id);
       const destination = setupCompleted

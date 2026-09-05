@@ -1067,7 +1067,7 @@ export default function HospitalMasterDashboard() {
     setCurrentUserRole(staffType);
 
     if (!hospitalId || !isHospitalAppRole(staffType)) {
-      router.replace(staffType !== 'Admin' ? '/staff/login' : '/admin/login');
+      router.replace('/admin/login?redirect=/dashboard');
       return;
     }
 

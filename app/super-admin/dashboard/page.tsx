@@ -35,7 +35,11 @@ export default function SuperAdminDashboardPage() {
           </p>
         </div>
 
-        <div className="p-6 bg-white border border-purple-200 rounded-3xl shadow-sm text-slate-900">
+        <button
+          type="button"
+          onClick={() => router.push('/admin/login?tenant=HOSP-01')}
+          className="w-full text-left p-6 bg-white border border-purple-200 rounded-3xl shadow-sm text-slate-900 hover:border-purple-400 hover:shadow-md transition"
+        >
           <div className="flex justify-between items-center mb-3">
             <span className="px-2.5 py-1 text-xs font-mono font-bold rounded-lg bg-purple-100 text-purple-800">
               HOSP-01
@@ -60,7 +64,10 @@ export default function SuperAdminDashboardPage() {
               <div className="text-[10px] font-bold text-emerald-500 uppercase mt-0.5">Staff</div>
             </div>
           </div>
-        </div>
+          <div className="mt-5 text-[11px] font-bold text-purple-700">
+            View Hospital Vault → Hospital Admin Login
+          </div>
+        </button>
 
         <div className="grid gap-4 md:grid-cols-2">
           <button
