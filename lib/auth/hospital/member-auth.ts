@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabaseClient';
 
-import { buildStaffSession } from '@/app/lib/auth/hospital/routing';
-import type { InternalStaffRole } from '@/app/lib/auth/hospital/types';
+import { buildStaffSession } from '@/src/app/lib/auth/hospital/routing';
+import type { InternalStaffRole } from '@/src/app/lib/auth/hospital/types';
 import {
   assignedAppForRole,
   portalRoleAllowsMember,

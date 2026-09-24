@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { Building2, Clock, LogOut, Search, Shield } from 'lucide-react';
 
-import { useAuth } from '@/app/context/AuthProvider';
-import { formatRoleBadge, ROLE_LABELS } from '@/app/lib/auth';
+import { useAuth } from '@/src/app/context/AuthProvider';
+import { formatRoleBadge, ROLE_LABELS } from '@/src/app/lib/auth';
 
 type StaffSessionHeaderProps = {
   moduleTitle?: string;

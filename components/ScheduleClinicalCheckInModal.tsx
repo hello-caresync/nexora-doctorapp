@@ -7,7 +7,7 @@ import {
   MEDICAL_CLASSIFICATIONS,
   filterHospitalsByCriteria,
   type MedicalClassification,
-} from "@/app/lib/scheduleCheckInData";
+} from "@/src/app/lib/scheduleCheckInData";
 
 export type ClinicalCheckInFormData = {
   patientName: string;

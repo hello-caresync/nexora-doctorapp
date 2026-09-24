@@ -10,12 +10,12 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 
-import { useAuth } from '@/app/context/AuthProvider';
+import { useAuth } from '@/src/app/context/AuthProvider';
 import {
   ERP_MODULE_COUNT,
   ERP_NAV_SECTIONS,
   isNavActive,
-} from '@/app/lib/erpNavigation';
+} from '@/src/app/lib/erpNavigation';
 
 export default function ErpSidebar() {
   const pathname = usePathname();

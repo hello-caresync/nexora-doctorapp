@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { APP_ROUTES } from '../app/lib/routes';
+import { APP_ROUTES } from '@/src/app/lib/routes';
 import { pingClientSession, revokeClientSession } from '@/lib/doctor/client/session-client';
 import {
   clearSecuritySession,
   IDLE_THRESHOLD_MS,
   readSecuritySession,
   SESSION_PING_INTERVAL_MS,
-} from '../app/lib/security';
+} from '@/src/app/lib/security';
 
 export type AuthSessionState = {
   isAuthenticated: boolean;

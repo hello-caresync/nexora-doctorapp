@@ -2,7 +2,7 @@
 
 import React from 'react';
 
-import { evaluatePasswordPolicy } from '@/app/lib/auth';
+import { evaluatePasswordPolicy } from '@/src/app/lib/auth';
 
 type PasswordPolicyChecklistProps = {
   password: string;

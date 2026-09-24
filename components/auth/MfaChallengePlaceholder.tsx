@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 
 import { AuthButton, AuthInput } from './AuthShell';
-import { verifyMfaChallenge, type MfaChallengeState } from '@/app/lib/auth';
+import { verifyMfaChallenge, type MfaChallengeState } from '@/src/app/lib/auth';
 
 type MfaChallengePlaceholderProps = {
   challenge: MfaChallengeState;

@@ -11,12 +11,12 @@ import {
 } from 'lucide-react';
 
 import { AuthAlert, AuthButton, AuthInput } from './AuthShell';
-import { APP_ROUTES } from '@/app/lib/routes';
+import { APP_ROUTES } from '@/src/app/lib/routes';
 import {
   signInWithBiometricBypass,
   signInWithEmail,
   type HospitalStaffProfile,
-} from '@/app/lib/auth';
+} from '@/src/app/lib/auth';
 
 type InternalStaffLoginProps = {
   bannerMessage?: string | null;

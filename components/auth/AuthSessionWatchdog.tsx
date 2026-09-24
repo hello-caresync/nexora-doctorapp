@@ -3,7 +3,7 @@
 import { useCallback, useRef } from 'react';
 
 import { useAuthSession } from '@/hooks/useAuthSession';
-import { useAuth } from '@/app/context/AuthProvider';
+import { useAuth } from '@/src/app/context/AuthProvider';
 
 /**
  * Mounts the Phase 1 session watchdog — client-side session validation on interval

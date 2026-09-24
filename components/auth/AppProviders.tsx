@@ -3,7 +3,7 @@
 import React from 'react';
 
 import AuthSessionWatchdog from './AuthSessionWatchdog';
-import { AuthProvider, SessionGuard } from '@/app/context/AuthProvider';
+import { AuthProvider, SessionGuard } from '@/src/app/context/AuthProvider';
 
 export default function AppProviders({ children }: { children: React.ReactNode }) {
   return (

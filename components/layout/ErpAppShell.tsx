@@ -2,7 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 
-import { usesBareLayout } from '@/app/lib/erpNavigation';
+import { usesBareLayout } from '@/src/app/lib/erpNavigation';
 import ErpSidebar from './ErpSidebar';
 import StaffSessionHeader from './StaffSessionHeader';
 
