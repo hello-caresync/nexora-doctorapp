@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Nexora Platform</title>
+    <script>
+      // Single Page Application routing bridge for Cloudflare Pages
+      // Captures the requested path and routes it through root Next.js index
+      (function() {
+        var path = window.location.pathname;
+        var search = window.location.search;
+        var hash = window.location.hash;
+        
+        // Store intended path in sessionStorage for client router hydration
+        sessionStorage.setItem('spa_redirect_path', path + search + hash);
+
+        // If path begins with /superadmin or /super-vault-access, redirect cleanly
+        if (path.indexOf('/super-admin') === 0) {
+          window.location.replace('/superadmin/login/' + search + hash);
+          return;
+        }
+
+        // Default: Redirect to root with query preserve so Next router mounts
+        window.location.replace('/' + (path !== '/' ? '?p=' + encodeURIComponent(path) : '') + hash);
+      })();
+    </script>
+  </head>
+  <body style="background-color: #0a0f1d; color: #94a3b8; font-family: ui-sans-serif, system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;">
+    <div style="text-align: center;">
+      <div style="font-size: 14px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;">
+        Routing to Secure Terminal...
+      </div>
+    </div>
+  </body>
+</html>
