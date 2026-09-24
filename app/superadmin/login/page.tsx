@@ -1,5 +1,6 @@
 'use client';
 
+export const dynamic = 'force-static';
 import React, { useState } from 'react';
 
 import { verifySuperAdminVaultCredentials } from '@/lib/auth/super-admin-auth';
